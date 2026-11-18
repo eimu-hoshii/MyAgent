@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
+    <link rel="stylesheet" href="/css/style.css?v=23" />
+</head>
+<body class="mode-agent">
+    <!-- トップヘッダーバー (OBSモード時は非表示) -->
+    <header class="top-bar obs-hide">
+        <div class="brand-group">
+            <span class="pulse-dot"></span>
+            <h1 class="brand-title">NIA <span class="sub">ニア // AUTONOMOUS CORE v3.0</span></h1>
+            <span id="current-mode-badge" class="mode-badge agent">AI AGENT MODE (自律エージェント稼働)</span>
+        </div>
+
+        <div class="mode-switcher">
+            <button class="mode-btn active" data-mode="agent">🛡️ AIエージェント (戦術・常駐モード)</button>
+            <button class="mode-btn" data-mode="vtuber">📺 自律型VTuber (ライブ配信モード)</button>
+        </div>
+
+        <div class="header-right">
+            <span id="metric-clock" class="clock-text">--:--:--</span>
+            <span id="router-status-pill" class="router-pill" title="LLM自動ルーティング判定（速度/バランス/知能）">🧭 AUTO:--</span>
+            <span id="engine-status-pill" class="engine-pill" title="Ollama / AivisSpeech / VOICEVOX 接続状態（クリックで再確認）">🧠LLM:-- / 🔊TTS:--</span>
+            <button id="btn-start-aivis" class="aivis-btn" title="AivisSpeech をウィンドウを出さずに裏起動します（二重起動防止付き・表のGUIがある場合は裏へ格納）">
+                🚀 Aivis裏起動
+            </button>
+            <span id="ws-status" class="status-pill online">ONLINE</span>
+            <select id="select-skill-preset" class="preset-select" title="1クリックで機能・AIモデル・UI密度を最適化するスキルプリセットパック">
+                <option value="">✨ プリセット選択...</option>
+            </select>
+            <button id="btn-toggle-ui-level" class="ui-level-btn" title="シンプル表示 ⇄ フル管制表示を切り替えます">
+                ⚙️ フル管制
+            </button>
+            <button id="btn-toggle-bilingual" class="bilingual-btn" title="リアルタイム多言語翻訳＆バイリンガル字幕をON/OFFします">
+                🌐 字幕:OFF
+            </button>
+            <button id="btn-stop-speech" class="stop-speech-btn" title="現在の発話と口パクを即座に停止します（ショートカット: Esc）">
+                ⏹️ 発話停止
+            </button>
+            <button id="btn-toggle-mute" class="mute-btn" title="音声ミュート（字幕のみ表示）を切り替えます">
+                🔊 音声ON
+            </button>
+            <button id="btn-toggle-mascot" class="mascot-btn" title="Windowsデスクトップ上に透過・最前面のニア常駐マスコットを起動/停止します">
+                🐾 常駐マスコット起動
+            </button>
+            <button id="btn-open-persona" class="persona-btn" title="ペルソナ・マスコット・ボイス・読み上げ辞書・配信・記憶の全設定を開きます">
+                ⚙️ ペルソナ・統合設定
+            </button>
+            <button id="btn-open-obs" class="obs-btn" title="OBS Studioのブラウザソース用背景透過ウィンドウを開きます">
+                🎥 OBS透過画面
+            </button>
+        </div>
+    </header>
+
+    <!-- メイン3カラムグリッド -->
+    <main class="main-grid">
+        <!-- 左カラム: 戦術テレメトリ・ポモドーロ・思考ログ・長期記憶・予定表 -->
+        <section class="panel left-panel obs-hide">
+            <div class="card telemetry-card">
+                <div class="card-header">
+                    <h2>SYSTEM // 機体・作業監視</h2>
+                    <span id="agent-state-text" class="state-idle">ACTIVE / 待機中</span>
+                </div>
+                <div class="metric-grid-2 ui-advanced-only">
+                    <div class="metric-row">
+                        <div class="metric-label">
+                            <span>RAM</span>
+                            <span id="metric-mem-val">--%</span>
+                        </div>
+                        <div class="progress-track"><div id="metric-mem-bar" class="progress-fill" style="width: 40%"></div></div>
+                    </div>
+                    <div class="metric-row">
+                        <div class="metric-label">
+                            <span>DISK</span>
+                            <span id="metric-disk-val">--%</span>
+                        </div>
+                        <div class="progress-track"><div id="metric-disk-bar" class="progress-fill disk" style="width: 50%"></div></div>
+                    </div>
+                </div>
+
+                <!-- アクティブウィンドウ＆ポモドーロタイマー行 -->
+                <div class="active-win-bar ui-advanced-only">
+                    <span class="win-icon">🪟 操作中:</span>
+                    <span id="metric-active-win" class="win-title" title="現在フォーカスされているアクティブウィンドウ">Desktop</span>
+                </div>
+
+                <div class="pomodoro-bar ui-advanced-only">
+                    <div class="pomo-info">
+                        <span id="pomo-badge" class="pomo-phase work">🍅 作業 25:00</span>
+                    </div>
+                    <div class="pomo-actions">
+                        <button type="button" id="btn-pomo-toggle" class="mini-action-btn">▶ 開始</button>
+                        <button type="button" id="btn-pomo-switch" class="mini-action-btn" title="作業/休憩フェーズ切替">⇄</button>
+                        <button type="button" id="btn-pomo-reset" class="mini-action-btn" title="タイマーリセット">↺</button>
+                    </div>
+                </div>
+
+                <div class="config-row compact">
+                    <div class="config-pair">
+                        <label>LLM:
+                            <select id="select-ollama-model">
+                                <option value="huihui_ai/gemma-4-abliterated:12b">huihui_ai/gemma-4-abliterated:12b</option>
+                            </select>
+                        </label>
+                        <label>TTS:
+                            <select id="select-tts-provider">
+                                <option value="edge_tts">Edge-TTS (高自然)</option>
+                                <option value="voicevox">VOICEVOX (:50021)</option>
+                                <option value="aivisspeech">AivisSpeech (:10101)</option>
+                                <option value="browser">Web Speech</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="check-proactive" checked />
+                        自律監視・作業声かけ・無言防止トークを有効化
+                    </label>
+                    <label class="checkbox-label sub-checkbox" id="label-discord-autonomous" title="ONにすると、自律監視・作業声かけ・無言防止トークの発言も Discord DM へ送信します（Discord連携有効時）">
+                        <input type="checkbox" id="check-discord-autonomous" />
+                        ↳ 自律トークを Discord にも流す
+                    </label>
+                </div>
+            </div>
+
+            <div class="card thought-card ui-advanced-only">
+                <div class="card-header">
+                    <h2>THOUGHT LOG // 思考・実行ログ</h2>
+                    <button type="button" id="btn-clear-thoughts" class="clear-btn" title="思考・自律実行ログをクリアします">🗑️ クリア</button>
+                </div>
+                <div id="thought-log" class="thought-log">
+                    <div class="thought-item thought">
+                        <span class="time">[SYSTEM]</span>
+                        <span class="msg">ニア（NIA）統合自律システム v3.0 稼働開始。ファイルD&amp;D・画面認識・実配信接続・読み上げ辞書・ポモドーロ対応完了。</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card memory-task-card">
+                <div class="split-columns">
+                    <!-- 長期記憶カラム -->
+                    <div class="sub-col">
+                        <div class="sub-col-header">
+                            <h3>🧠 長期記憶</h3>
+                            <div class="sub-col-btns">
+                                <button type="button" id="btn-consolidate-mem" class="tiny-btn" title="意味ベクトルで重複・古い記憶を統合整理（睡眠統合）">🧹整理</button>
+                                <button type="button" id="btn-toggle-add-mem" class="tiny-btn" title="記憶を手動追加">＋追加</button>
+                                <button type="button" id="btn-clear-memories" class="tiny-btn danger" title="ペルソナ設定以外の獲得記憶を一括クリア">🗑️消去</button>
+                            </div>
+                        </div>
+                        <div class="inline-row semantic-search-row" style="margin-bottom:4px;">
+                            <input type="text" id="input-mem-semantic" placeholder="🔍 意味検索 (例: 好きな飲み物)..." />
+                            <button type="button" id="btn-mem-semantic" class="tiny-btn primary">検索</button>
+                        </div>
+                        <!-- 記憶追加インラインフォーム -->
+                        <div id="form-add-memory" class="inline-add-box hidden">
+                            <div class="inline-row">
+                                <select id="new-mem-cat">
+                                    <option value="fact">📌 事実・知識</option>
+                                    <option value="user_pref">👤 ユーザー好み</option>
+                                    <option value="research">🔍 調査メモ</option>
+                                </select>
+                                <select id="new-mem-imp">
+                                    <option value="5">★5 (最重要)</option>
+                                    <option value="4" selected>★4 (重要)</option>
+                                    <option value="3">★3 (通常)</option>
+                                </select>
+                            </div>
+                            <div class="inline-row">
+                                <input type="text" id="new-mem-content" placeholder="記憶させる内容を入力..." />
+                                <button type="button" id="btn-submit-mem" class="tiny-btn primary">保存</button>
+                            </div>
+                        </div>
+                        <ul id="memory-list" class="compact-list"></ul>
+                    </div>
+
+                    <!-- カレンダー予定・監視タスクカラム -->
+                    <div class="sub-col">
+                        <div class="sub-col-header">
+                            <h3>📌 予定・タスク</h3>
+                            <div class="sub-col-btns">
+                                <button type="button" id="btn-toggle-add-task" class="tiny-btn" title="予定・リマインダーを追加">＋予定</button>
+                            </div>
+                        </div>
+                        <!-- 予定追加インラインフォーム -->
+                        <div id="form-add-task" class="inline-add-box hidden">
+                            <input type="text" id="new-task-title" placeholder="予定・タスク名..." />
+                            <div class="inline-row">
+                                <input type="text" id="new-task-due" placeholder="時刻(22:00) または 分数(10)" title="HH:MM形式の時刻、または何分後かの数値を入力" />
+                                <select id="new-task-repeat">
+                                    <option value="none">単発</option>
+                                    <option value="daily">毎日</option>
+                                    <option value="weekly">毎週</option>
+                                    <option value="hourly">毎時</option>
+                                </select>
+                                <button type="button" id="btn-submit-task" class="tiny-btn primary">登録</button>
+                            </div>
+                        </div>
+                        <ul id="task-list" class="compact-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 中央カラム: アバターステージ (OBSモード時はこのステージのみ透過表示) -->
+        <section id="center-stage-dropzone" class="center-stage">
+            <!-- ファイルドラッグ＆ドロップ時のオーバーレイ -->
+            <div id="drop-overlay" class="drop-overlay hidden">
+                <div class="drop-box">
+                    <span class="drop-icon">📂</span>
+                    <p>ここにファイル（PDF・Word・Excel・PPTX・コード・テキスト・音声・画像）をドロップすると<br>ニアが即座に読み取って要約・文字起こし・解説・視覚解析します</p>
+                    <p class="drop-hint" style="margin-top:8px; font-size:0.78rem; color:#94a3b8;">（クリックまたは Esc キーで閉じます）</p>
+                </div>
+            </div>
+
+            <div class="stage-overlay-top obs-hide">
+                <div class="emotion-status-box">
+                    <span class="label">EMOTION:</span>
+                    <span id="emotion-badge" class="emotion-badge" data-emotion="normal">通常 (NORMAL)</span>
+                </div>
+                <div class="stage-actions">
+                    <button id="btn-vision-capture" class="mini-btn accent" title="現在のPC画面またはアクティブウィンドウをキャプチャしてニアに見せます">
+                        📸 画面を見せる
+                    </button>
+                    <button id="btn-clipboard-analyze" class="mini-btn" title="現在のクリップボードのテキストをニアに解析させます">
+                        📋 クリップボード解析
+                    </button>
+                    <button id="btn-test-voice" class="mini-btn">🔊 発話テスト</button>
+                    <button id="btn-toggle-view" class="mini-btn">全身表示へ切替</button>
+                    <button id="btn-stage-zoom-in" class="mini-btn" title="キャラクターを拡大（マウスホイール上でも拡大可能）">➕</button>
+                    <button id="btn-stage-zoom-out" class="mini-btn" title="キャラクターを縮小（マウスホイール下でも縮小可能）">➖</button>
+                    <button id="btn-stage-reset-pos" class="mini-btn" title="キャラクターのサイズ・上下位置を初期位置に戻す（ドラッグで上下移動可能）">🔄 位置</button>
+                </div>
+            </div>
+
+            <!-- 6表情リアルタイム切替パレット (OBSモード時は非表示) -->
+            <div class="emotion-palette obs-hide ui-advanced-only">
+                <button class="emotion-btn active" data-emotion="normal">通常</button>
+                <button class="emotion-btn" data-emotion="smile">微笑み</button>
+                <button class="emotion-btn" data-emotion="joy">喜び</button>
+                <button class="emotion-btn" data-emotion="serious">怒り・真剣</button>
+                <button class="emotion-btn" data-emotion="surprised">驚き</button>
+                <button class="emotion-btn" data-emotion="troubled">困り</button>
+            </div>
+
+            <!-- 目開け/目閉じ & 口の形（通常・あ・い・う・え・お）確認パレット -->
+            <div class="mouth-palette obs-hide ui-advanced-only">
+                <button id="btn-toggle-blink" class="eye-btn" title="目を開けた状態と閉じた状態を切り替えます">👁️ 目開け(自動瞬き)</button>
+                <span class="divider">|</span>
+                <button class="vowel-btn active" data-vowel="auto" title="発話に合わせて自動で口パクします">口:自動</button>
+                <button class="vowel-btn" data-vowel="normal">通常</button>
+                <button class="vowel-btn" data-vowel="a">あ</button>
+                <button class="vowel-btn" data-vowel="i">い</button>
+                <button class="vowel-btn" data-vowel="u">う</button>
+                <button class="vowel-btn" data-vowel="e">え</button>
+                <button class="vowel-btn" data-vowel="o">お</button>
+            </div>
+
+            <!-- Canvas アバター描画領域 -->
+            <div class="canvas-wrapper">
+                <!-- OBS配信・ステージ用 現在の話題＆ポモドーロ サブテロップ -->
+                <div id="obs-topic-widget" class="obs-topic-widget hidden">
+                    <span id="obs-topic-text" class="obs-topic-text"></span>
+                    <span id="obs-pomo-pill" class="obs-pomo-pill hidden"></span>
+                </div>
+                <!-- OBS / 配信モード用 動的演出オーバーレイ（ニュースカード・投票バー・お便り・歌枠歌詞） -->
+                <div id="obs-news-card-box" class="obs-overlay-card obs-news-card hidden"></div>
+                <div id="obs-poll-overlay" class="obs-overlay-card obs-poll-card hidden"></div>
+                <div id="obs-mailbag-card" class="obs-overlay-card obs-mailbag-card hidden"></div>
+                <div id="obs-karaoke-bar" class="obs-overlay-card obs-karaoke-card hidden"></div>
+                <!-- AIエージェント用 コマンド実行 HITL 承認バナー（OBSモード時は非表示） -->
+                <div id="approval-banner-container" class="approval-banner-container obs-hide hidden"></div>
+                <!-- マスコットモード専用ホバーミニツールバー（サイズ変更・上下移動・全身切替・会話） -->
+                <div class="mascot-hover-toolbar">
+                    <button type="button" id="btn-mascot-zoom-in" class="mascot-tool-pill" title="拡大（マウスホイール上回転でも拡大できます）">➕</button>
+                    <button type="button" id="btn-mascot-zoom-out" class="mascot-tool-pill" title="縮小（マウスホイール下回転でも縮小できます）">➖</button>
+                    <button type="button" id="btn-mascot-pan-up" class="mascot-tool-pill" title="上へ移動（マウスドラッグでも上下左右へ動かせます）">⬆️</button>
+                    <button type="button" id="btn-mascot-pan-down" class="mascot-tool-pill" title="下へ移動（マウスドラッグでも上下左右へ動かせます）">⬇️</button>
+                    <button type="button" id="btn-mascot-reset-pos" class="mascot-tool-pill" title="サイズ・上下位置をリセット">🔄</button>
+                    <button type="button" id="btn-mascot-view" class="mascot-tool-pill" title="全身 / バストアップ切替">🧍 全身/顔</button>
+                    <button type="button" id="btn-mascot-chat" class="mascot-tool-pill" title="会話入力欄の開閉（ダブルクリックでも開閉）">💬 会話</button>
+                    <button type="button" id="btn-mascot-vision" class="mascot-tool-pill" title="画面キャプチャ解析">📸</button>
+                </div>
+                <canvas id="avatar-canvas" width="760" height="740"></canvas>
+
+                <!-- オーディオスペクトラムバー（吹き出し表示時のみ連動表示） -->
+                <div id="audio-visualizer" class="audio-visualizer obs-hide">
+                    <div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div>
+                    <div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div>
+                    <div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div>
+                    <div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div><div class="viz-bar"></div>
+                </div>
+
+                <!-- リアルタイム字幕テロップボックス (OBS配信画面にもそのまま表示) -->
+                <div id="subtitle-box" class="subtitle-box" data-emotion="normal">
+                    <div id="subtitle-speaker-tag" class="speaker-tag">NIA（ニア） // AI AGENT</div>
+                    <p id="subtitle-text">……べ、別にあなたのために待機してたわけじゃないわよ。システムは正常……用があるなら早く言いなさいよね。</p>
+                    <p id="subtitle-sub-text" class="subtitle-sub hidden"></p>
+                </div>
+            </div>
+
+            <!-- 下部：クイック自律コマンド＆音声・テキスト入力バー (OBSモード時は非表示) -->
+            <div class="command-console obs-hide">
+                <div class="quick-commands">
+                    <button class="quick-cmd-btn" data-prompt="現在のPCのシステム状態（メモリ・ディスク・アクティブウィンドウ等）を診断して報告して">
+                        ⚡ PCシステム診断
+                    </button>
+                    <button class="quick-cmd-btn" data-action="vision">
+                        📸 今の画面を見て解説
+                    </button>
+                    <button class="quick-cmd-btn" data-prompt="Web検索を使って、今日・昨日の最新テックニュースや注目トピックを調べて要約して">
+                        🌐 最新ニュース調査
+                    </button>
+                    <button class="quick-cmd-btn" data-prompt="現在の記憶と未完了の予定・タスクを確認して、戦術ブリーフィングをして">
+                        📋 戦術ブリーフィング
+                    </button>
+                    <label class="file-upload-label" title="テキスト・コード・画像ファイルを選択してニアに解析させます">
+                        📂 ファイル解析
+                        <input type="file" id="file-input-hidden" class="hidden" />
+                    </label>
+                </div>
+
+                <form id="chat-form" class="chat-form">
+                    <button type="button" id="btn-mic" class="mic-btn" title="マイク音声認識で話しかける (ショートカット: Alt+Space)">
+                        🎙️ マイク入力
+                    </button>
+                    <input
+                        type="text"
+                        id="chat-input"
+                        placeholder="ニアに指示・質問を入力（ファイルをここにドラッグ＆ドロップも可 / Alt+Spaceで即フォーカス）..."
+                        autocomplete="off"
+                    />
+                    <button type="submit" class="send-btn">送信 (EXEC)</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- 右カラム: 対話ストリーム & VTuberライブ配信ディレクター -->
+        <section class="panel right-panel obs-hide">
+            <div class="card stream-card">
+                <div class="card-header">
+                    <h2>LIVE CHAT // 対話・コメント</h2>
+                    <button type="button" id="btn-clear-chat" class="clear-btn" title="対話・配信コメント履歴をクリアします">🗑️ クリア</button>
+                </div>
+                <div id="chat-feed" class="chat-feed"></div>
+            </div>
+
+            <!-- AIエージェントモード専用: 自律運用・定時ワークフロー・RAG・Deep Research -->
+            <div class="card agent-ops-card ui-advanced-only">
+                <div class="card-header">
+                    <h2>AGENT // 自律運用・RAG・調査</h2>
+                    <span id="rag-stats-badge" class="live-conn-badge">RAG: --件</span>
+                </div>
+
+                <!-- 定期自律ワークフロー管理 -->
+                <div class="ops-sub-block">
+                    <div class="sub-header">
+                        <span>⏰ 定時自律ワークフロー</span>
+                        <div class="sub-col-btns">
+                            <button type="button" id="btn-toggle-add-wf" class="tiny-btn">＋追加</button>
+                            <button type="button" id="btn-reindex-rag" class="tiny-btn primary" title="対象フォルダのローカル資料を今すぐRAG索引化">🔄 RAG索引</button>
+                        </div>
+                    </div>
+                    <div id="form-add-workflow" class="inline-add-box hidden">
+                        <input type="text" id="wf-name" placeholder="ワークフロー名 (例: 朝ブリーフィング)" />
+                        <div class="inline-row">
+                            <select id="wf-type">
+                                <option value="briefing">☀️ 定時ブリーフィング</option>
+                                <option value="web_watch">🌐 Webサイト更新監視</option>
+                                <option value="custom_prompt">⚙️ カスタム指示</option>
+                            </select>
+                            <select id="wf-sched-kind">
+                                <option value="daily">毎日 (HH:MM)</option>
+                                <option value="interval">定期 (分間隔)</option>
+                            </select>
+                            <input type="text" id="wf-sched-val" value="08:00" placeholder="08:00 / 60" style="max-width:78px;" />
+                        </div>
+                        <input type="text" id="wf-url" placeholder="監視対象URL (Web監視時のみ)" />
+                        <div class="inline-row">
+                            <input type="text" id="wf-prompt" placeholder="実行指示プロンプト（省略可）" />
+                            <button type="button" id="btn-submit-wf" class="tiny-btn primary">登録</button>
+                        </div>
+                    </div>
+                    <ul id="workflow-list" class="compact-list ops-list"></ul>
+                </div>
+
+                <!-- バックグラウンド深掘りリサーチ (Deep Research) -->
+                <div class="ops-sub-block">
+                    <div class="sub-header">
+                        <span>🔍 Deep Research (並列調査)</span>
+                    </div>
+                    <div class="inline-row">
+                        <input type="text" id="input-research-topic" placeholder="調査テーマを入力（裏で記事を比較してレポート保存）" />
+                        <button type="button" id="btn-start-research" class="tiny-btn primary">調査開始</button>
+                    </div>
+                    <ul id="research-list" class="compact-list ops-list"></ul>
+                </div>
+            </div>
+
+            <!-- VTuberモード専用: 配信・企画・OBS/VTS・お便り・歌枠スタジオ -->
+            <div class="card vtuber-director-card">
+                <div class="card-header">
+                    <h2>VTUBER // 配信スタジオ</h2>
+                    <span id="live-conn-badge" class="live-conn-badge">LOCAL SIM</span>
+                </div>
+                <div class="director-action-grid">
+                    <button type="button" id="btn-next-talk-deck" class="director-btn deck" title="登録された話題デッキから次の企画トークを発動します">
+                        🎲 話題デッキ発動
+                    </button>
+                    <button type="button" id="btn-toggle-bgm" class="director-btn bgm" title="配信用アンビエントBGMと発話時オートダッキングをON/OFFします">
+                        🎵 配信BGM: OFF
+                    </button>
+                </div>
+                <div class="inline-row ui-advanced-only" style="margin-top:4px;">
+                    <select id="select-bgm-scene" title="配信BGMの雰囲気・シーン別プリセットを選択">
+                        <option value="ambient">🎶 雑談 (アンビエント)</option>
+                        <option value="lofi_chill">☕ 深夜まったり (Lo-Fi)</option>
+                        <option value="news_pulse">📰 ニュース解説 (パルス)</option>
+                        <option value="tense_synth">⚡ ゲーム・緊張 (シンセ)</option>
+                        <option value="ending_warm">🌙 エンディング (温かめ)</option>
+                    </select>
+                    <button type="button" id="btn-stream-session-toggle" class="mini-action-btn" title="配信アーカイブ＆チャプター生成用の記録を開始/終了">🔴 配信記録開始</button>
+                </div>
+                <div class="inline-row ui-advanced-only" style="margin-top:4px;">
+                    <button type="button" class="mini-action-btn obs-scene-btn" data-scene="talk">雑談枠</button>
+                    <button type="button" class="mini-action-btn obs-scene-btn" data-scene="news">ニュース枠</button>
+                    <button type="button" class="mini-action-btn obs-scene-btn" data-scene="game">ゲーム枠</button>
+                    <button type="button" class="mini-action-btn obs-scene-btn" data-scene="karaoke">歌枠</button>
+                    <button type="button" class="mini-action-btn obs-scene-btn" data-scene="brb">離席</button>
+                </div>
+                <button id="btn-demo-stream" class="demo-stream-btn">
+                    ⚪ 模擬コメント自動流入: OFF
+                </button>
+                <div class="viewer-sim-inputs">
+                    <div class="inline-row">
+                        <input type="text" id="input-stream-topic" placeholder="📌 OBS配信テーマ / 目標テロップ..." />
+                        <button type="button" id="btn-set-topic" class="tiny-btn primary">反映</button>
+                    </div>
+                    <input type="text" id="viewer-name-input" placeholder="リスナー名 (例: 名無しのエンジニア)" value="名無しのリスナー" />
+                    <input type="text" id="viewer-comment-input" placeholder="視聴者コメントを入力（投票中なら 1〜4 で投票）..." />
+                    <div class="sim-btn-row">
+                        <button type="button" id="btn-send-viewer-comment" class="sim-btn comment">💬 コメント送信</button>
+                        <button type="button" id="btn-send-superchat" class="sim-btn superchat">💎 ¥10,000 スパチャ</button>
+                    </div>
+                </div>
+
+                <!-- 参加型ミニゲーム＆アンケート投票 -->
+                <div class="ops-sub-block ui-advanced-only">
+                    <div class="sub-header">
+                        <span>📊 参加型投票・企画</span>
+                        <button type="button" id="btn-poll-stop" class="tiny-btn danger">締切/結果</button>
+                    </div>
+                    <div class="inline-row">
+                        <select id="poll-game-type" style="max-width:95px;">
+                            <option value="poll">📊 投票</option>
+                            <option value="quiz">❓ クイズ</option>
+                            <option value="ogiri">🤣 大喜利</option>
+                        </select>
+                        <input type="text" id="poll-title-input" placeholder="お題 (例: 今日の開発VSゲーム)" />
+                    </div>
+                    <div class="inline-row" style="margin-top:3px;">
+                        <input type="text" id="poll-options-input" placeholder="選択肢(カンマ区切り 例: 開発, ゲーム)" />
+                        <button type="button" id="btn-poll-start" class="tiny-btn primary">開始</button>
+                    </div>
+                </div>
+
+                <!-- 匿名お便り・質問箱 & 歌枠 -->
+                <div class="ops-sub-block ui-advanced-only">
+                    <div class="sub-header">
+                        <span>📮 お便り箱・🎤 歌枠</span>
+                        <button type="button" id="btn-read-mailbag" class="tiny-btn primary">📮 1通読む</button>
+                    </div>
+                    <div class="inline-row">
+                        <input type="text" id="mailbag-input" placeholder="質問・お便りを投稿..." />
+                        <button type="button" id="btn-add-mailbag" class="tiny-btn">追加</button>
+                    </div>
+                    <div class="inline-row" style="margin-top:4px;">
+                        <select id="select-karaoke-track"></select>
+                        <button type="button" id="btn-play-karaoke" class="tiny-btn primary">🎤 歌枠再生</button>
+                    </div>
+                </div>
+
+                <div class="viewer-memory-box ui-advanced-only">
+                    <div class="sub-header">
+                        <span>👥 常連リスナー記憶</span>
+                        <button type="button" id="btn-clear-viewers" class="tiny-btn danger" title="常連リスナー記憶をすべて消去">全消去</button>
+                    </div>
+                    <ul id="viewer-list" class="compact-list viewer-list"></ul>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 統合システム＆ペルソナ設定モーダル (全5タブ) -->
+    <div id="persona-modal" class="modal-backdrop hidden obs-hide">
+        <div class="modal-dialog large">
+            <div class="modal-header">
+                <h2>⚙️ ニア（NIA） ペルソナ ＆ 全機能統合設定</h2>
+                <button type="button" id="btn-close-persona" class="modal-close-btn">×</button>
+            </div>
+
+            <!-- タブナビゲーション -->
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab active" data-tab="tab-persona">🎭 ペルソナ</button>
+                <button type="button" class="modal-tab" data-tab="tab-mascot">🐾 マスコット・視覚・監視</button>
+                <button type="button" class="modal-tab" data-tab="tab-vtuber">📺 配信接続・企画・NG検閲</button>
+                <button type="button" class="modal-tab" data-tab="tab-voice">🔊 ボイス・辞書・OBS演出</button>
+                <button type="button" class="modal-tab" data-tab="tab-core">🧠 知能・記憶・予定表</button>
+                <button type="button" class="modal-tab" data-tab="tab-discord">💬 Discord連携</button>
+                <button type="button" class="modal-tab" data-tab="tab-agent-ext">🤖 自律操作・RAG・MCP</button>
+                <button type="button" class="modal-tab" data-tab="tab-vtuber-ext">🎬 配信連携・OBS・安全</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- タブ1: ペルソナ・基本設定 -->
+                <div id="tab-persona" class="tab-pane active">
+                    <label class="modal-field">
+                        <span>キャラクター表示名 (<code>{agent_name}</code> に反映)</span>
+                        <input type="text" id="input-agent-name" value="ニア (NIA)" />
+                    </label>
+                    <label class="modal-field">
+                        <span>🛡️ AIエージェントモード ペルソナ設定（性格・口調・役割）</span>
+                        <textarea id="textarea-persona-agent" rows="6"></textarea>
+                    </label>
+                    <label class="modal-field">
+                        <span>📺 自律型VTuberモード ペルソナ設定（配信スタイル・リスナー対応・口調）</span>
+                        <textarea id="textarea-persona-vtuber" rows="6"></textarea>
+                    </label>
+                </div>
+
+                <!-- タブ2: デスクトップマスコット・画面認識・作業監視 -->
+                <div id="tab-mascot" class="tab-pane hidden">
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>常駐マスコット 表示サイズ倍率 (0.5〜1.5)</span>
+                            <input type="number" id="cfg-mascot-scale" step="0.05" min="0.5" max="1.5" value="1.0" />
+                        </label>
+                        <label class="modal-field">
+                            <span>常駐ウィンドウ 初期位置</span>
+                            <select id="cfg-mascot-position">
+                                <option value="bottom-right">右下 (Bottom-Right)</option>
+                                <option value="bottom-left">左下 (Bottom-Left)</option>
+                                <option value="top-right">右上 (Top-Right)</option>
+                                <option value="top-left">左上 (Top-Left)</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>画面認識 (Vision) キャプチャ対象</span>
+                            <select id="cfg-vision-target">
+                                <option value="active_window">現在操作中のアクティブウィンドウ</option>
+                                <option value="fullscreen">デスクトップ全画面</option>
+                                <option value="clipboard">クリップボード内の画像</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>アクティブアプリ声かけ監視間隔 (秒)</span>
+                            <input type="number" id="cfg-window-watch-sec" min="30" max="3600" value="180" />
+                        </label>
+                        <label class="modal-field">
+                            <span>ポモドーロ 作業時間 (分) / 休憩時間 (分)</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-pomo-work" min="1" max="180" value="25" placeholder="作業(分)" />
+                                <input type="number" id="cfg-pomo-break" min="1" max="60" value="5" placeholder="休憩(分)" />
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>ホットキー割り当て / 音声ウェイクワード</span>
+                            <div class="inline-row">
+                                <input type="text" id="cfg-hotkey-ptt" value="Alt+Space" placeholder="Alt+Space" />
+                                <input type="text" id="cfg-wake-word" value="ニア" placeholder="ウェイクワード" />
+                            </div>
+                        </label>
+                    </div>
+                    <label class="modal-field">
+                        <span>プライバシー保護：画面キャプチャ除外アプリ名（カンマ区切り）</span>
+                        <input type="text" id="cfg-vision-exclude" placeholder="KeePass, 1Password, Bitwarden, パスワード" />
+                    </label>
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-mascot-topmost" checked /> 常駐マスコットを常に最前面に固定</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-mascot-clickthrough" /> マウスホバー時にマスコットを半透明化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-window-watch" checked /> アクティブアプリ連動の自律声かけを有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-dnd-fullscreen" checked /> フルスクリーン作業・ゲーム中は自律発話をミュート</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-wake-required" /> 音声入力時にウェイクワード（「ニア」）を必須にする</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-clipboard-watch" /> コピーしたテキストを自動監視してニアが解説する</label>
+                    </div>
+                    <div class="inline-action-bar">
+                        <span>🚀 Windows起動時にマスコットを自動常駐（スタートアップ登録）:</span>
+                        <span id="startup-status-label" class="status-badge-text">確認中...</span>
+                        <button type="button" id="btn-toggle-startup" class="tiny-btn primary">自動起動をON/OFF</button>
+                    </div>
+                </div>
+
+                <!-- タブ3: VTuber実配信接続・話題デッキ・NGワード検閲 -->
+                <div id="tab-vtuber" class="tab-pane hidden">
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🔴 YouTube Live 配信URL または Video ID</span>
+                            <input type="text" id="cfg-youtube-id" placeholder="例: dQw4w9WgXcQ または https://youtube.com/watch?v=..." />
+                        </label>
+                        <label class="modal-field">
+                            <span>🟣 Twitch チャンネル名 (APIキー不要で接続)</span>
+                            <input type="text" id="cfg-twitch-ch" placeholder="例: shima_channel" />
+                        </label>
+                        <label class="modal-field">
+                            <span>実配信コメント取得間隔 (秒) / キュー上限数</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-live-poll" min="2" max="60" value="6" />
+                                <input type="number" id="cfg-live-queue" min="1" max="50" value="8" />
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>無言防止 (Silence Breaker) 発動秒数</span>
+                            <input type="number" id="cfg-silence-sec" min="10" max="600" value="90" />
+                        </label>
+                    </div>
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-news" checked /> 話題デッキ発動時に自動で最新ニュースをWeb検索して紹介する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-advance" /> 無言防止タイマー時に現在の話題テーマ・OBSシーンも自動で次へ切り替える</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-viewer-profile" checked /> 常連リスナー記憶（初見/常連・過去の会話特徴を自動記憶）</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-topic-telop" checked /> OBS配信画面に「現在の配信テーマ」サブテロップを表示</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-telop-pomo" checked /> OBSサブテロップにポモドーロ残り時間も表示する</label>
+                    </div>
+                    <label class="modal-field">
+                        <span>🎲 配信企画・話題デッキリスト（1行に1テーマ記述）</span>
+                        <textarea id="cfg-talk-deck" rows="4"></textarea>
+                    </label>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🛡️ カスタムNGワードリスト（カンマ区切り）</span>
+                            <input type="text" id="cfg-ng-words" placeholder="死ね, 殺す, 爆破予告, 個人情報" />
+                        </label>
+                        <label class="modal-field">
+                            <span>NGワード・プロンプトインジェクション検知時の挙動</span>
+                            <select id="cfg-ng-action">
+                                <option value="deflect">クールにツッコんで軽くあしらう (Deflect)</option>
+                                <option value="ignore">完全に無視してキューから破棄する (Ignore)</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- タブ4: ボイス詳細・読み上げ辞書・OBS演出 -->
+                <div id="tab-voice" class="tab-pane hidden">
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>Edge-TTS 音声モデル名</span>
+                            <select id="cfg-edge-voice">
+                                <option value="ja-JP-NanamiNeural">ja-JP-NanamiNeural (七海 / 標準クール＆キュート)</option>
+                                <option value="ja-JP-MayuNeural">ja-JP-MayuNeural (真優 / 落ち着いたお姉さん)</option>
+                                <option value="ja-JP-AoiNeural">ja-JP-AoiNeural (葵 / 明るい元気系)</option>
+                                <option value="ja-JP-ShioriNeural">ja-JP-ShioriNeural (栞 / クール・知的)</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>VOICEVOX 話者ID / AivisSpeech 話者ID</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-vv-speaker" value="3" title="VOICEVOX Speaker ID" />
+                                <input type="number" id="cfg-aivis-speaker" value="888753760" title="AivisSpeech Speaker ID" />
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>ボイス音量 (<span id="val-tts-vol">1.0</span>) / 話速 (<span id="val-tts-speed">1.08</span>)</span>
+                            <div class="inline-row">
+                                <input type="range" id="cfg-tts-vol" min="0.2" max="1.5" step="0.05" value="1.0" />
+                                <input type="range" id="cfg-tts-speed" min="0.6" max="1.8" step="0.02" value="1.08" />
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>ピッチ (<span id="val-tts-pitch">1.0</span>) / 抑揚 (<span id="val-tts-into">1.1</span>)</span>
+                            <div class="inline-row">
+                                <input type="range" id="cfg-tts-pitch" min="0.7" max="1.3" step="0.02" value="1.0" />
+                                <input type="range" id="cfg-tts-into" min="0.5" max="1.8" step="0.05" value="1.1" />
+                            </div>
+                        </label>
+                    </div>
+
+                    <label class="modal-field">
+                        <span>📖 読み上げ辞書（1行に <code>英単語や固有名詞=カタカナ読み</code> の形式で記述）</span>
+                        <textarea id="cfg-pronunciation-dict" rows="4" placeholder="NIA=ニア&#10;SQLite=エスキューライト&#10;GitHub=ギットハブ"></textarea>
+                    </label>
+
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>OBS感情モーション強度 (<span id="val-obs-motion">1.0</span>) / 字幕サイズ (<span id="val-obs-sub">1.0</span>)</span>
+                            <div class="inline-row">
+                                <input type="range" id="cfg-obs-motion" min="0.0" max="2.0" step="0.1" value="1.0" />
+                                <input type="range" id="cfg-obs-sub" min="0.7" max="1.5" step="0.05" value="1.0" />
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>配信BGM音量 (<span id="val-bgm-vol">0.18</span>) / 発話時減衰率 (<span id="val-bgm-duck">0.25</span>)</span>
+                            <div class="inline-row">
+                                <input type="range" id="cfg-bgm-vol" min="0.02" max="0.6" step="0.02" value="0.18" />
+                                <input type="range" id="cfg-bgm-duck" min="0.05" max="0.8" step="0.05" value="0.25" />
+                            </div>
+                        </label>
+                    </div>
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-se" checked /> スパチャ・予定アラート時に効果音(SE)を鳴らす</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-bgm" /> 配信用アンビエントBGMを有効化（発話時オートダッキング連動）</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🎧 音声出力デバイス (OBS音声分離 / VB-Cable等へルーティング)</span>
+                            <div class="inline-row">
+                                <select id="cfg-audio-sink">
+                                    <option value="">既定のスピーカー / ヘッドホン</option>
+                                </select>
+                                <button type="button" id="btn-refresh-audio-sinks" class="tiny-btn">🔄 更新</button>
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>🧹 音声キャッシュ自動削除 (保持件数 / 保持分数)</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-cache-files" min="5" max="500" value="30" title="最大保持ファイル数" />
+                                <input type="number" id="cfg-cache-age" min="1" max="1440" value="30" title="最大保持時間（分）" />
+                                <button type="button" id="btn-cleanup-cache" class="tiny-btn primary">今すぐ掃除</button>
+                            </div>
+                            <span id="audio-cache-stats" class="sub-hint-text">キャッシュ: --件 (-- MB)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- タブ5: 知能・Web深掘り・記憶・予定表 -->
+                <div id="tab-core" class="tab-pane hidden">
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>Webページ本文深掘り (<code>fetch_webpage</code>) 最大取得文字数</span>
+                            <input type="number" id="cfg-fetch-chars" min="500" max="20000" step="500" value="4000" />
+                        </label>
+                        <label class="modal-field">
+                            <span>Web検索・ページ取得タイムアウト (秒)</span>
+                            <input type="number" id="cfg-fetch-timeout" min="3" max="60" value="10" />
+                        </label>
+                        <label class="modal-field">
+                            <span>プロンプトへ注入する長期記憶の最大件数</span>
+                            <input type="number" id="cfg-mem-limit" min="1" max="25" value="8" />
+                        </label>
+                        <label class="modal-field">
+                            <span>会話履歴の記憶ターン数 (直近何往復覚えるか / 0〜50)</span>
+                            <input type="number" id="cfg-history-limit" min="0" max="50" value="12" />
+                        </label>
+                        <label class="modal-field">
+                            <span>予定アラート スヌーズ時間 (分)</span>
+                            <input type="number" id="cfg-snooze-min" min="1" max="120" value="5" />
+                        </label>
+                        <label class="modal-field">
+                            <span>LLM自動ルーティングモード (速度⇄知能)</span>
+                            <select id="cfg-llm-routing">
+                                <option value="auto">🧭 自動判定 (質問難易度で切替)</option>
+                                <option value="fast">⚡ 常に高速 (軽量モデル)</option>
+                                <option value="smart">🧠 常に高精度 (大型モデル)</option>
+                                <option value="off">🔒 手動固定 (上部のLLM選択を使用)</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>⚡ 高速ティア用モデル (挨拶・短文用)</span>
+                            <input type="text" id="cfg-model-fast" list="ollama-models-datalist" value="gemma4:e4b" />
+                        </label>
+                        <label class="modal-field">
+                            <span>🧠 高精度ティア用モデル (実装・分析用)</span>
+                            <input type="text" id="cfg-model-smart" list="ollama-models-datalist" value="gemma4:26b" />
+                        </label>
+                        <label class="modal-field">
+                            <span>🌐 バイリンガル字幕 翻訳先言語</span>
+                            <select id="cfg-bilingual-lang">
+                                <option value="en">🇺🇸 English (英語)</option>
+                                <option value="ko">🇰🇷 한국어 (韓国語)</option>
+                                <option value="zh">🇹🇼 中文 (中国語)</option>
+                            </select>
+                        </label>
+                    </div>
+                    <datalist id="ollama-models-datalist">
+                        <option value="gemma4:e4b"></option>
+                        <option value="gemma4:12b"></option>
+                        <option value="huihui_ai/gemma-4-abliterated:12b"></option>
+                        <option value="gemma4:26b"></option>
+                    </datalist>
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-auto-mem" checked /> 会話の中からユーザーの好みや重要事実を自動抽出して長期記憶へ保存する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-sched-voice" checked /> 予定・リマインダー時刻が到来した際にニアが音声で通知する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-local-launch" checked /> 許可リスト制のローカル操作ツール（アプリ起動・URL・フォルダ）を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-self-review" checked /> 高難度タスク時に高精度モデルの1パス自己レビューを実行（Agent）</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-stream-tts" checked /> 文単位Streaming先読みTTS再生（体感遅延半減）</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-semantic-mem" checked /> 意味ベクトル検索（Sudachi形態素＋同義語クラスタ）を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-auto-consolidate" checked /> 夜間・待機中に記憶の自動重複統合（睡眠統合）を実行</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-bilingual-enabled" /> リアルタイム多言語翻訳＆バイリンガル字幕を表示（OBS対応）</label>
+                    </div>
+                    <label class="modal-field">
+                        <span>🖥️ ローカル操作許可リスト（1行に <code>登録名=app|url|folder=パスまたはURL</code> の形式で記述）</span>
+                        <textarea id="cfg-local-launch-list" rows="4" placeholder="メモ帳=app=notepad.exe&#10;GitHub=url=https://github.com"></textarea>
+                    </label>
+                </div>
+
+                <!-- タブ6: Discord Bot 双方向連携 -->
+                <div id="tab-discord" class="tab-pane hidden">
+                    <div class="inline-action-bar">
+                        <span>🤖 Discord Bot 接続状態:</span>
+                        <span id="discord-status-label" class="status-badge-text">⚪ 停止中</span>
+                        <button type="button" id="btn-test-discord" class="tiny-btn primary">📨 テストDM送信</button>
+                    </div>
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-enabled" /> Discord Bot 連携を有効化する（即時接続）</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-proactive" checked /> 予定・ポモドーロ通知を Discord DM に送信</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-autonomous" /> 自律監視・作業声かけ・無言防止トークを Discord DM に流す</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-image" checked /> 画面認識(Vision)実行時にスクショ画像を添付返信</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-voice" /> 返信時にTTS音声ファイル(.wav/.mp3)も添付する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-discord-thread-iso" checked /> チャンネル内のスレッドごとに会話文脈を独立分離する</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🔑 Discord Bot トークン（OpenClaw用等の既存トークン流用可）</span>
+                            <div class="inline-row">
+                                <input type="password" id="cfg-discord-token" placeholder="Botトークンを入力..." autocomplete="off" />
+                                <button type="button" id="btn-clear-discord-token" class="tiny-btn danger" title="保存済みBotトークンを消去">消去</button>
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>🛡️ 許可する Discord User ID（必須・カンマ区切り・自分のID）</span>
+                            <input type="text" id="cfg-discord-users" placeholder="例: 123456789012345678" />
+                        </label>
+                        <label class="modal-field">
+                            <span>💬 メンション無しで応答する許可チャンネルID（任意・カンマ区切り）</span>
+                            <input type="text" id="cfg-discord-channels" placeholder="空欄時はDMと@メンションのみ応答" />
+                        </label>
+                        <label class="modal-field">
+                            <span>🔔 能動通知DMの宛先 User ID（空欄時は許可User IDの先頭へDM）</span>
+                            <input type="text" id="cfg-discord-notify-user" placeholder="空欄可" />
+                        </label>
+                    </div>
+                    <div class="discord-guide-box">
+                        <p><strong>💡 セットアップ＆安全運用のポイント</strong></p>
+                        <ul>
+                            <li><strong>User ID の取得</strong>: Discord「ユーザー設定 → 詳細設定 → 開発者モード」を ON にし、自分のアイコンを右クリック →「ユーザーIDをコピー」。※許可リストが空の間は安全のため全員拒否します。</li>
+                            <li><strong>OpenClaw 用 Bot の流用</strong>: 同じトークンで OpenClaw 側も同時に起動していると二重反応するため、流用時は OpenClaw 側を停止するか専用チャンネルIDで分離してください。</li>
+                            <li><strong>通常発言の読み取り</strong>: サーバー内チャンネルでメンション無し応答を使う場合は、Discord Developer Portal の Bot 設定で <code>MESSAGE CONTENT INTENT</code> を ON にしてください。</li>
+                            <li><strong>使えるショートカット</strong>: <code>!status</code> / <code>!vision</code> / <code>!briefing</code> / <code>!research テーマ</code> / <code>!otayori 質問</code> / <code>!approve ID</code> / <code>!joinvc</code> / <code>!help</code></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- タブ7: AIエージェント高度拡張 (ファイル・RAG・コマンド承認・Playwright・MCP・STT・外部連携) -->
+                <div id="tab-agent-ext" class="tab-pane hidden">
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-file-tools" checked /> ローカルファイル読み書き・検索 (<code>file_op</code>) を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-cmd-exec" checked /> 承認制コマンド/スクリプト実行 (<code>run_command</code>) を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-rag-enabled" checked /> ローカル資料 RAG 検索 (SQLite FTS5) を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-workflow-enabled" checked /> 定時自律ワークフロー (Heartbeat / Web監視) を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-playwright-enabled" checked /> Playwright ヘッドレスブラウザ (<code>browser_action</code>) を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-smart-hooks" checked /> エラーログ検知クリップボード / 作業連動スマートフックを有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-toast-watch" /> Windows Action Center 新着通知を監視・要約する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-win-power-ctrl" checked /> 確認バナーなしで PC ロック・スリープ (<code>lock_pc</code> / <code>sleep_pc</code>) を即実行</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-local-stt" /> ローカルマイク常時待機 (VAD + faster-whisper STT) を有効化</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🛡️ コマンド実行時の承認ポリシー</span>
+                            <select id="cfg-cmd-policy">
+                                <option value="always">常にユーザー承認を待つ (最も安全 / 推奨)</option>
+                                <option value="safe_readonly_auto">純読み取りコマンドのみ自動、他は要承認</option>
+                                <option value="never">承認確認なしで即時実行 (自己責任)</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>🎙️ ローカル Whisper 文字起こしモデル</span>
+                            <select id="cfg-whisper-model">
+                                <option value="tiny">tiny (超高速・低負荷)</option>
+                                <option value="base">base (バランス型)</option>
+                                <option value="small">small (高精度)</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>🐙 GitHub デフォルトリポジトリ (<code>owner/repo</code>)</span>
+                            <input type="text" id="cfg-github-repo" placeholder="例: eimu-hoshii/MyAgent" />
+                        </label>
+                        <label class="modal-field">
+                            <span>🔑 GitHub Personal Access Token (任意)</span>
+                            <input type="password" id="cfg-github-token" placeholder="設定済みなら空欄可" autocomplete="off" />
+                        </label>
+                    </div>
+                    <label class="modal-field">
+                        <span>📅 Google/Outlook カレンダー iCal (.ics) 非公開URL（または <code>data/google_token.json</code> 配置）</span>
+                        <input type="text" id="cfg-google-ics" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics" />
+                    </label>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>📂 ファイル操作許可ディレクトリ（改行またはカンマ区切り）</span>
+                            <textarea id="cfg-file-dirs" rows="2"></textarea>
+                        </label>
+                        <label class="modal-field">
+                            <span>📚 RAG 自動索引対象フォルダ（改行またはカンマ区切り）</span>
+                            <textarea id="cfg-rag-dirs" rows="2"></textarea>
+                        </label>
+                    </div>
+                    <label class="modal-field">
+                        <span>🔌 MCP サーバー設定 JSON（例: <code>[{"name":"fs","command":"npx","args":["-y","..."]}]</code>）</span>
+                        <div class="inline-row">
+                            <textarea id="cfg-mcp-json" rows="2" placeholder="[]"></textarea>
+                            <button type="button" id="btn-test-mcp" class="tiny-btn primary">ツール一覧確認</button>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- タブ8: VTuber配信拡張 (OBS WebSocket・VTube Studio・画面実況・プライバシー) -->
+                <div id="tab-vtuber-ext" class="tab-pane hidden">
+                    <div class="checkbox-grid">
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-live-batch" checked /> 高速コメント流入時の自動バッチ要約を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-vtuber-news-card" checked /> ニュース紹介時に配信画面へ引用カードをオーバーレイ表示</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-vtuber-screen-watch" /> ゲーム・動画の定期画面変化検知実況を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-vtuber-collab" /> 相方マイク併用コラボモード（人間相棒＋リスナー両対応）</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-ws-enabled" /> OBS Studio WebSocket v5 自律シーン制御を有効化</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-vts-enabled" /> VTube Studio API 表情・口形連携を有効化</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🎥 OBS WebSocket ホスト / ポート</span>
+                            <div class="inline-row">
+                                <input type="text" id="cfg-obs-host" value="127.0.0.1" />
+                                <input type="number" id="cfg-obs-port" value="4455" min="1" max="65535" style="max-width:95px;" />
+                                <button type="button" id="btn-test-obs-ws" class="tiny-btn primary">🔌 テスト</button>
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>🔑 OBS WebSocket パスワード</span>
+                            <input type="password" id="cfg-obs-pass" placeholder="未設定時は空欄" autocomplete="off" />
+                        </label>
+                        <label class="modal-field">
+                            <span>✨ VTube Studio WebSocket URL</span>
+                            <div class="inline-row">
+                                <input type="text" id="cfg-vts-url" value="ws://127.0.0.1:8001" />
+                                <button type="button" id="btn-test-vts" class="tiny-btn primary">✨ テスト</button>
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            <span>🎮 配信画面実況の監視間隔 (秒) / 許可ウィンドウ名</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-vtuber-screen-sec" min="5" max="300" value="25" style="max-width:85px;" />
+                                <input type="text" id="cfg-vtuber-window-filter" placeholder="空欄=除外外すべて / 例: Minecraft" />
+                            </div>
+                        </label>
+                    </div>
+                    <label class="modal-field">
+                        <span>🛡️ 配信事故防止：口外禁止ワード（本名・住所・最寄り駅等をカンマ区切りで設定 → VTuber発話時に自動マスク）</span>
+                        <input type="text" id="cfg-vtuber-blocklist" placeholder="例: 山田太郎, 京都府亀岡市〇〇町" />
+                    </label>
+                    <label class="modal-field">
+                        <span>🎬 OBS シーン割り当て名（<code>雑談 / ニュース / ゲーム / 歌枠 / 離席中</code>）</span>
+                        <div class="inline-row">
+                            <input type="text" id="cfg-obs-scene-talk" value="雑談" title="talk" />
+                            <input type="text" id="cfg-obs-scene-news" value="ニュース" title="news" />
+                            <input type="text" id="cfg-obs-scene-game" value="ゲーム" title="game" />
+                            <input type="text" id="cfg-obs-scene-karaoke" value="歌枠" title="karaoke" />
+                            <input type="text" id="cfg-obs-scene-brb" value="離席中" title="brb" />
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" id="btn-reset-persona" class="modal-btn reset">🔄 ペルソナを初期状態に戻す</button>
+                <div class="modal-footer-right">
+                    <button type="button" id="btn-cancel-persona" class="modal-btn cancel">キャンセル</button>
+                    <button type="button" id="btn-save-persona" class="modal-btn save">💾 全設定を保存して即時適用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/app.js?v=27"></script>
+</body>
+</html>

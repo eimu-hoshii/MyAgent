@@ -1,0 +1,36 @@
+# Python / Virtual Environment
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Secrets & Private Runtime Config (NEVER COMMIT)
+data/secrets.json
+data/persona_settings.json
+data/google_token.json
+data/credentials.json
+*.env
+.env*
+
+# Databases & Local Logs
+data/*.db
+data/*.db-*
+data/*.sqlite*
+data/*.pid
+data/*.log
+
+# Generated Caches & User Reports
+data/audio_cache/
+data/vision_captures/
+data/research_reports/
+data/stream_archives/
+data/rag_docs/*
+!data/rag_docs/.gitkeep
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
