@@ -271,18 +271,19 @@ export class AvatarRenderer {
         this.canvas.style.cursor = this.pointerMode === "pan" ? "grab" : "pointer";
     }
 
-    setOutfit(outfitId, withSparkle = true) {
+    setOutfit(outfitId, withSparkle = true, forceReload = false) {
         const nextId = (outfitId || "default").trim().toLowerCase();
         const changed = this.activeOutfit !== nextId;
         this.activeOutfit = nextId;
-        if (nextId !== "default" && !this.outfitImages[nextId]) {
+        if (nextId !== "default" && (forceReload || !this.outfitImages[nextId])) {
             const bust = new Image();
-            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=5`;
+            const q = forceReload ? `t=${Date.now()}` : "v=5";
+            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?${q}`;
             const full = new Image();
-            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=5`;
+            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?${q}`;
             this.outfitImages[nextId] = { bust, full };
         }
-        if (changed && withSparkle) {
+        if ((changed || forceReload) && withSparkle) {
             this.outfitChangeUntil = performance.now() + 1150;
             this.emotionTriggerTime = performance.now();
         }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=26" />
+    <link rel="stylesheet" href="/css/style.css?v=27" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -249,6 +249,9 @@
                     <div class="outfit-picker-group">
                         <select id="select-outfit-genre" class="outfit-select" title="衣装ジャンルを選択"></select>
                         <select id="select-outfit-item" class="outfit-select" title="着替える衣装を選択"></select>
+                        <button type="button" id="btn-open-outfit-modal" class="outfit-add-btn" title="Nano Banana Pro等で生成した衣装画像をワンクリック自動透過登録（クロマキー緑 #00FF00 対応）">
+                            ➕ 衣装追加
+                        </button>
                     </div>
                 </div>
             </div>
@@ -986,6 +989,92 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=31"></script>
+    <!-- カスタム衣装ワンクリック追加＆Nano Banana Proプロンプト生成モーダル -->
+    <div id="outfit-upload-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="outfit-modal-title">
+        <div class="modal-dialog outfit-modal-dialog">
+            <div class="modal-header">
+                <h2 id="outfit-modal-title">👗 衣装ワンクリック登録 ＆ Nano Banana Pro テンプレート</h2>
+                <button type="button" id="btn-close-outfit-modal" class="modal-close-btn" aria-label="閉じる">✕</button>
+            </div>
+            <div class="modal-body outfit-modal-body">
+                <!-- Step 1: Nano Banana Pro 用プロンプトビルダー -->
+                <div class="outfit-template-box">
+                    <div class="outfit-box-head">
+                        <span>📋 Step 1: Nano Banana Pro 用コピペプロンプト（純緑クロマキー <code>#00FF00</code> 背景指定）</span>
+                        <button type="button" id="btn-copy-nbp-prompt" class="mini-btn accent">📋 プロンプトをコピー</button>
+                    </div>
+                    <p class="outfit-hint">
+                        Gemini (Nano Banana Pro) に <code>picture/黒ブレザー版キャラクターリファレンスシート.png</code> を添付し、下のプロンプトを貼り付けて生成→保存してください。
+                    </p>
+                    <div class="outfit-preset-chips">
+                        <button type="button" class="nbp-chip" data-name="🎅 サンタコスプレ" data-genre="cosplay" data-outfit="Cute Christmas Santa cosplay: crimson red velvet Santa mini dress trimmed with fluffy white faux-fur along the neckline, cuffs, and skirt hem, black waist belt with gold buckle, cute mini Santa hat perched on her head, white over-knee socks, and red fur-trimmed ankle boots">🎅 サンタ</button>
+                        <button type="button" class="nbp-chip" data-name="🎃 ハロウィン魔女" data-genre="cosplay" data-outfit="Cute Halloween gothic witch cosplay: black and deep-crimson ruffled gothic witch dress with lace trim, cute pointed mini witch hat perched on her head, striped dark thigh-high socks, and black lace-up boots">🎃 ハロウィン</button>
+                        <button type="button" class="nbp-chip" data-name="🐰 ステージバニー" data-genre="cosplay" data-outfit="Stylish cute anime stage-idol bunny cosplay: black tuxedo-style bunny mini dress with white shirt collar, crimson bow tie, black bunny-ear headband, white cuffs, dark sheer tights, and black heels">🐰 バニー</button>
+                        <button type="button" class="nbp-chip" data-name="⛵ 夏服セーラー(ルーズ)" data-genre="school" data-outfit="Classic Japanese summer sailor uniform: crisp white short-sleeve sailor blouse with black collar and white stripes, red ribbon tie, pleated black mini skirt, chunky slouchy white loose socks (ルーズソックス) gathered around the ankles, and black school loafers">⛵ ルーズ夏セーラー</button>
+                        <button type="button" class="nbp-chip" data-name="🏖️ フリルビキニ水着" data-genre="swimwear" data-outfit="Cute stylish resort off-shoulder ruffled flare bikini swimwear in black and crimson plaid with white lace trim, matching ruffled swim skirt bottoms, barefoot">🏖️ フリル水着</button>
+                    </div>
+                    <label class="modal-field compact">
+                        <span>衣装の指定（日本語でも英語でも可・入力すると下のプロンプトへ自動反映）</span>
+                        <input type="text" id="input-nbp-outfit-desc" placeholder="例: Cute Christmas Santa cosplay..." />
+                    </label>
+                    <textarea id="textarea-nbp-prompt" rows="4" readonly></textarea>
+                </div>
+
+                <!-- Step 2: 画像アップロード＆自動透過登録 -->
+                <div class="outfit-upload-box">
+                    <div class="outfit-box-head">
+                        <span>✨ Step 2: 生成画像をアップロード（クロマキー緑 #00FF00 / 白背景 / 透過PNG 自動判別）</span>
+                    </div>
+                    <div class="outfit-upload-grid">
+                        <label class="outfit-dropzone" id="dropzone-outfit-full">
+                            <input type="file" id="input-outfit-full-file" accept="image/*" hidden />
+                            <div id="preview-outfit-full" class="outfit-preview-box">
+                                <span>🖼️ 全身画像をドロップ<br>またはクリック選択（必須）</span>
+                            </div>
+                        </label>
+                        <label class="outfit-dropzone optional" id="dropzone-outfit-bust">
+                            <input type="file" id="input-outfit-bust-file" accept="image/*" hidden />
+                            <div id="preview-outfit-bust" class="outfit-preview-box">
+                                <span>🙂 バストアップ専用画像<br>（任意・2K以上の全身なら不要）</span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="outfit-meta-grid">
+                        <label class="modal-field compact">
+                            <span>ジャンル</span>
+                            <select id="input-outfit-genre">
+                                <option value="school">🏫 制服・標準</option>
+                                <option value="casual">🧶 カジュアル・部屋着</option>
+                                <option value="sport">🏃 体操服・スポーツ</option>
+                                <option value="swimwear">🏖️ 水着・リゾート</option>
+                                <option value="cosplay" selected>✨ コスプレ・和装</option>
+                                <option value="custom">📁 カスタム追加</option>
+                            </select>
+                        </label>
+                        <label class="modal-field compact">
+                            <span>衣装名（表示名）</span>
+                            <input type="text" id="input-outfit-name" placeholder="例: 🎅 サンタコスプレ" />
+                        </label>
+                        <label class="modal-field compact">
+                            <span>衣装ID（空欄で自動 / 既存IDで上書き）</span>
+                            <input type="text" id="input-outfit-id" placeholder="例: santa, sailor" />
+                        </label>
+                    </div>
+                    <label class="checkbox-row compact">
+                        <input type="checkbox" id="input-outfit-flip" />
+                        <span>左右反転して登録する（浴衣・着物などの襟合わせ補正用）</span>
+                    </label>
+                    <div id="outfit-upload-status" class="outfit-upload-status"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btn-cancel-outfit-modal" class="modal-btn cancel">閉じる</button>
+                <button type="button" id="btn-submit-outfit-upload" class="modal-btn save">✨ 自動透過して登録＆着替え</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/app.js?v=32"></script>
 </body>
 </html>

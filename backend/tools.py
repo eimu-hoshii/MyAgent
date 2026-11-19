@@ -44,13 +44,38 @@ def list_available_outfits() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     genre_names = {g["id"]: g["name"] for g in OUTFIT_GENRES}
+
+    def _load_outfit_meta(oid: str) -> dict[str, Any]:
+        mp = os.path.join(outfits_root, oid, "meta.json")
+        if os.path.isfile(mp):
+            try:
+                with open(mp, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    return d
+            except Exception:
+                pass
+        return {}
+
     for oid, meta in OUTFIT_CATALOG.items():
         if oid == "default":
             available = True
+            custom_m: dict[str, Any] = {}
         else:
             available = os.path.isfile(os.path.join(outfits_root, oid, "full.png"))
-        gid = meta.get("genre", "custom")
-        items.append({**meta, "genre": gid, "genre_name": genre_names.get(gid, "📁 カスタム追加"), "available": available})
+            custom_m = _load_outfit_meta(oid)
+        merged = {**meta, **{k: v for k, v in custom_m.items() if v}}
+        gid = str(merged.get("genre") or "custom")
+        items.append(
+            {
+                **merged,
+                "id": oid,
+                "genre": gid,
+                "genre_name": genre_names.get(gid, "📁 カスタム追加"),
+                "available": available,
+                "is_custom": False,
+            }
+        )
         seen.add(oid)
     if os.path.isdir(outfits_root):
         for entry in sorted(os.listdir(outfits_root)):
@@ -58,15 +83,20 @@ def list_available_outfits() -> list[dict[str, Any]]:
                 continue
             full_p = os.path.join(outfits_root, entry, "full.png")
             if os.path.isfile(full_p):
+                cm = _load_outfit_meta(entry)
+                gid = str(cm.get("genre") or "custom")
+                disp_name = str(cm.get("name") or f"✨ {entry}")
                 items.append(
                     {
                         "id": entry,
-                        "genre": "custom",
-                        "genre_name": genre_names.get("custom", "📁 カスタム追加"),
-                        "name": f"✨ カスタム衣装 ({entry})",
-                        "short": entry,
-                        "description": f"カスタム追加衣装 ({entry})",
+                        "genre": gid,
+                        "genre_name": genre_names.get(gid, "📁 カスタム追加"),
+                        "name": disp_name,
+                        "short": str(cm.get("short") or disp_name),
+                        "description": str(cm.get("description") or f"カスタム追加衣装 ({entry})"),
+                        "bg_mode": str(cm.get("bg_mode") or ""),
                         "available": True,
+                        "is_custom": True,
                     }
                 )
     return items

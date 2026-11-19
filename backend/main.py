@@ -542,6 +542,106 @@ async def update_appearance_api(payload: dict[str, Any] = Body(...)) -> dict[str
     return {"ok": True, **state}
 
 
+@app.post("/api/outfits/upload")
+async def upload_custom_outfit_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """
+    Nano Banana Pro 等で生成した衣装画像（クロマキー緑 #00FF00 / 白背景 / 透過PNG 自動判別）を
+    アップロード受け付けし、高精度透過 full.png / bust.png 生成・meta.json 保存・即時着替え反映する。
+    """
+    import asyncio
+    import datetime as _dt
+    import io
+    import re
+    from PIL import Image
+    from scripts.build_outfit_assets import build_outfit_from_pil
+
+    full_b64 = str(payload.get("full_image_base64", "") or "").strip()
+    if not full_b64:
+        return {"ok": False, "error": "全身画像が選択されていません。"}
+    if "," in full_b64:
+        full_b64 = full_b64.split(",", 1)[1]
+
+    raw_id = str(payload.get("outfit_id", "") or "").strip().lower()
+    safe_id = re.sub(r"[^a-z0-9_-]", "", raw_id)[:40]
+    if not safe_id or safe_id == "default":
+        safe_id = f"custom_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    name = str(payload.get("name", "") or "").strip()[:60] or f"✨ {safe_id}"
+    genre = str(payload.get("genre", "custom") or "custom").strip().lower()
+    if genre not in {"school", "casual", "sport", "swimwear", "cosplay", "custom"}:
+        genre = "custom"
+    description = str(payload.get("description", "") or "").strip()[:160] or f"カスタム登録衣装 ({name})"
+    bust_ratio = max(0.22, min(0.65, float(payload.get("bust_ratio", 0.28) or 0.28)))
+    flip_horizontal = bool(payload.get("flip_horizontal", False))
+
+    try:
+        full_bytes = base64.b64decode(full_b64)
+        full_pil = Image.open(io.BytesIO(full_bytes))
+        full_pil.load()
+    except Exception as exc:
+        return {"ok": False, "error": f"全身画像の読み込みに失敗しました: {exc}"}
+
+    bust_pil_in = None
+    bust_b64 = str(payload.get("bust_image_base64", "") or "").strip()
+    if bust_b64:
+        if "," in bust_b64:
+            bust_b64 = bust_b64.split(",", 1)[1]
+        try:
+            bust_bytes = base64.b64decode(bust_b64)
+            bust_pil_in = Image.open(io.BytesIO(bust_bytes))
+            bust_pil_in.load()
+        except Exception as exc:
+            return {"ok": False, "error": f"バストアップ画像の読み込みに失敗しました: {exc}"}
+
+    try:
+        build_res = await asyncio.to_thread(
+            build_outfit_from_pil,
+            safe_id,
+            full_pil,
+            bust_pil_in=bust_pil_in,
+            bust_ratio=bust_ratio,
+            flip_horizontal=flip_horizontal,
+            meta={"name": name, "short": name, "genre": genre, "description": description},
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"透過処理に失敗しました: {exc}"}
+
+    # 登録完了後、即座にその衣装へ着替えて全クライアントへ配信
+    config.active_outfit = safe_id
+    config.save_persona_settings()
+    state = await orchestrator.broadcast_appearance_state()
+    await orchestrator.broadcast({"type": "config_updated", "config": orchestrator.get_public_config()})
+    return {
+        "ok": True,
+        "outfit_id": safe_id,
+        "bg_mode": build_res.get("bg_mode", ""),
+        "full_size": build_res.get("full_size", []),
+        "bust_size": build_res.get("bust_size", []),
+        **state,
+    }
+
+
+@app.delete("/api/outfits/{outfit_id}")
+async def delete_custom_outfit_api(outfit_id: str) -> dict[str, Any]:
+    """カスタム追加した衣装フォルダを削除する（標準制服 default は削除不可）。"""
+    import re
+    import shutil
+
+    safe_id = re.sub(r"[^a-z0-9_-]", "", (outfit_id or "").strip().lower())
+    if not safe_id or safe_id == "default":
+        return {"ok": False, "error": "標準制服 (default) は削除できません。"}
+    target_dir = os.path.join(FRONTEND_DIR, "assets", "outfits", safe_id)
+    if not os.path.isdir(target_dir):
+        return {"ok": False, "error": "指定の衣装が見つかりません。"}
+    shutil.rmtree(target_dir, ignore_errors=True)
+    if config.active_outfit == safe_id:
+        config.active_outfit = "default"
+        config.save_persona_settings()
+    state = await orchestrator.broadcast_appearance_state()
+    await orchestrator.broadcast({"type": "config_updated", "config": orchestrator.get_public_config()})
+    return {"ok": True, "deleted": safe_id, **state}
+
+
 @app.post("/api/interact")
 async def interact_avatar_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """頭なでなで (`pet`) やほっぺつつき (`poke`) のインタラクションを実行する。"""

@@ -236,7 +236,7 @@ flowchart LR
 | `GET /api/memories/semantic`, `POST /api/memories/consolidate` | 意味ベクトル記憶検索 / 睡眠統合（重複マージ＆整理）即時実行 |
 | `POST /api/mascot/toggle`, `POST /api/speech/stop`, `POST /api/voice/mute` | マスコット起動停止 / 発話停止 / ミュートトグル |
 | `POST /api/engines/aivisspeech/start` | AivisSpeech の二重起動防止付きバックグラウンド裏起動・GUI裏格納 |
-| `GET /api/outfits`, `POST /api/appearance`, `POST /api/interact`, `POST /api/affection/reset` | 衣装一覧取得 / 衣装・チーク変更 / ふれあい反応 / 本日のデレ度をLv.1ツンへ手動リセット |
+| `GET /api/outfits`, `POST /api/outfits/upload`, `DELETE /api/outfits/{id}`, `POST /api/appearance`, `POST /api/interact`, `POST /api/affection/reset` | 衣装一覧 / 画像アップロード自動透過登録（クロマキー緑・AI透過自動判別） / 削除 / 着替え / ふれあい / 本日のデレ度リセット |
 | `POST /api/vision_analyze`, `/api/clipboard_analyze`, `/api/upload_analyze` | 画面解析・クリップボード・ファイルアップロード解析 |
 | `GET/POST/DELETE /api/agent/workflows...` | 定時自律ワークフロー登録・即時実行・切替・削除 |
 | `POST /api/agent/rag/reindex`, `GET /api/agent/rag/search` | ローカル RAG インデックス更新 / 検索 |

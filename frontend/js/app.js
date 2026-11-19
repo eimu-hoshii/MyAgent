@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=12";
+import { AvatarRenderer } from "./avatar.js?v=13";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -611,6 +611,7 @@ class AgentController {
                 }).catch(() => {});
             });
         }
+        this._setupOutfitUploadModal();
 
         // OBS配信テーマ更新 & 常連リスナー記憶全消去
         const setTopicBtn = document.getElementById("btn-set-topic");
@@ -2995,6 +2996,207 @@ class AgentController {
             }
         } catch (e) {
             console.warn("インタラクション送信失敗:", e);
+        }
+    }
+
+    _setupOutfitUploadModal() {
+        const modal = document.getElementById("outfit-upload-modal");
+        const openBtn = document.getElementById("btn-open-outfit-modal");
+        const closeBtn = document.getElementById("btn-close-outfit-modal");
+        const cancelBtn = document.getElementById("btn-cancel-outfit-modal");
+        const submitBtn = document.getElementById("btn-submit-outfit-upload");
+        const copyBtn = document.getElementById("btn-copy-nbp-prompt");
+        const descInput = document.getElementById("input-nbp-outfit-desc");
+        const promptArea = document.getElementById("textarea-nbp-prompt");
+        const fullFile = document.getElementById("input-outfit-full-file");
+        const bustFile = document.getElementById("input-outfit-bust-file");
+        const fullZone = document.getElementById("dropzone-outfit-full");
+        const bustZone = document.getElementById("dropzone-outfit-bust");
+        const fullPrev = document.getElementById("preview-outfit-full");
+        const bustPrev = document.getElementById("preview-outfit-bust");
+        const genreInput = document.getElementById("input-outfit-genre");
+        const nameInput = document.getElementById("input-outfit-name");
+        const idInput = document.getElementById("input-outfit-id");
+        const flipInput = document.getElementById("input-outfit-flip");
+        const statusEl = document.getElementById("outfit-upload-status");
+        if (!modal || !openBtn) return;
+
+        this._pendingOutfitFullB64 = "";
+        this._pendingOutfitBustB64 = "";
+
+        const buildPrompt = (outfitDesc) => {
+            const desc = (outfitDesc || "").trim() || "Cute Christmas Santa cosplay mini dress with fluffy white fur trim, mini Santa hat, white over-knee socks, and red boots";
+            return [
+                "Generate a single high-resolution (2K) full-body front-facing anime character standing sprite of the exact same anime character from the attached reference sheet (sleek glossy black high twin-tails, sharp crimson red eyes, warm tanned skin tone, cool blushing tsundere expression, slender build).",
+                `Outfit: ${desc}.`,
+                "Pose & Composition: Full body from head to toe with small margins, standing straight facing directly forward, arms relaxed slightly away from her sides so hands and fingers do not overlap her body. Clean sharp Japanese anime cel-shaded lineart matching the reference character.",
+                "Background: Completely flat, uniform pure chroma-key green (#00FF00) solid background with ZERO shadows, ZERO floor shadow, ZERO green lighting reflection on the character, no text, no borders, no props.",
+            ].join("\n");
+        };
+
+        const syncPrompt = () => {
+            if (promptArea) promptArea.value = buildPrompt(descInput?.value || "");
+        };
+        if (descInput) {
+            descInput.addEventListener("input", syncPrompt);
+            if (!descInput.value) {
+                descInput.value = "Cute Christmas Santa cosplay: crimson red velvet Santa mini dress trimmed with fluffy white faux-fur, mini Santa hat, white over-knee socks, and red fur-trimmed ankle boots";
+            }
+        }
+        syncPrompt();
+
+        modal.querySelectorAll(".nbp-chip").forEach((chip) => {
+            chip.addEventListener("click", () => {
+                if (descInput) descInput.value = chip.dataset.outfit || "";
+                if (nameInput && chip.dataset.name) nameInput.value = chip.dataset.name;
+                if (genreInput && chip.dataset.genre) genreInput.value = chip.dataset.genre;
+                syncPrompt();
+            });
+        });
+
+        if (copyBtn && promptArea) {
+            copyBtn.addEventListener("click", async () => {
+                try {
+                    await navigator.clipboard.writeText(promptArea.value);
+                    const prev = copyBtn.textContent;
+                    copyBtn.textContent = "✅ コピー完了！";
+                    setTimeout(() => { copyBtn.textContent = prev; }, 1600);
+                } catch (_) {
+                    promptArea.select();
+                    document.execCommand("copy");
+                }
+            });
+        }
+
+        const bindImageDrop = (fileInput, zoneEl, previewEl, targetKey, defaultHtml) => {
+            const loadFile = (file) => {
+                if (!file || !file.type.startsWith("image/")) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const dataUrl = String(reader.result || "");
+                    this[targetKey] = dataUrl;
+                    if (previewEl) {
+                        previewEl.innerHTML = `<img src="${dataUrl}" alt="preview" />`;
+                    }
+                };
+                reader.readAsDataURL(file);
+            };
+            if (fileInput) {
+                fileInput.addEventListener("change", () => loadFile(fileInput.files?.[0]));
+            }
+            if (zoneEl) {
+                zoneEl.addEventListener("dragover", (e) => {
+                    e.preventDefault();
+                    zoneEl.classList.add("dragover");
+                });
+                zoneEl.addEventListener("dragleave", () => zoneEl.classList.remove("dragover"));
+                zoneEl.addEventListener("drop", (e) => {
+                    e.preventDefault();
+                    zoneEl.classList.remove("dragover");
+                    loadFile(e.dataTransfer?.files?.[0]);
+                });
+            }
+            return () => {
+                this[targetKey] = "";
+                if (fileInput) fileInput.value = "";
+                if (previewEl) previewEl.innerHTML = defaultHtml;
+            };
+        };
+
+        const resetFull = bindImageDrop(
+            fullFile,
+            fullZone,
+            fullPrev,
+            "_pendingOutfitFullB64",
+            "<span>🖼️ 全身画像をドロップ<br>またはクリック選択（必須）</span>"
+        );
+        const resetBust = bindImageDrop(
+            bustFile,
+            bustZone,
+            bustPrev,
+            "_pendingOutfitBustB64",
+            "<span>🙂 バストアップ専用画像<br>（任意・2K以上の全身なら不要）</span>"
+        );
+
+        const closeModal = () => modal.classList.add("hidden");
+        openBtn.addEventListener("click", () => {
+            if (statusEl) {
+                statusEl.textContent = "";
+                statusEl.classList.remove("error");
+            }
+            syncPrompt();
+            modal.classList.remove("hidden");
+        });
+        if (closeBtn) closeBtn.addEventListener("click", closeModal);
+        if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+        modal.addEventListener("click", (e) => {
+            if (e.target === modal) closeModal();
+        });
+
+        if (submitBtn) {
+            submitBtn.addEventListener("click", async () => {
+                if (!this._pendingOutfitFullB64) {
+                    if (statusEl) {
+                        statusEl.textContent = "⚠️ 全身画像を選択またはドロップしてください。";
+                        statusEl.classList.add("error");
+                    }
+                    return;
+                }
+                submitBtn.disabled = true;
+                const origLabel = submitBtn.textContent;
+                submitBtn.textContent = "⏳ 自動透過＆登録中...";
+                if (statusEl) {
+                    statusEl.textContent = "背景を自動判別（クロマキー緑 / AI透過）して処理しています...";
+                    statusEl.classList.remove("error");
+                }
+                try {
+                    const resp = await fetch("/api/outfits/upload", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            full_image_base64: this._pendingOutfitFullB64,
+                            bust_image_base64: this._pendingOutfitBustB64 || "",
+                            genre: genreInput?.value || "custom",
+                            name: nameInput?.value?.trim() || "",
+                            outfit_id: idInput?.value?.trim() || "",
+                            flip_horizontal: !!flipInput?.checked,
+                        }),
+                    });
+                    const res = await resp.json();
+                    if (!res.ok) {
+                        if (statusEl) {
+                            statusEl.textContent = `❌ ${res.error || "登録に失敗しました"}`;
+                            statusEl.classList.add("error");
+                        }
+                        return;
+                    }
+                    const modeLabel =
+                        res.bg_mode === "chroma_green"
+                            ? "クロマキー緑・スピル完全除去"
+                            : res.bg_mode === "pre_transparent"
+                            ? "透過PNGそのまま反映"
+                            : "AI透過 (isnet-anime)";
+                    this._renderAppearanceState(res, true);
+                    if (res.outfit_id) {
+                        this.avatar.setOutfit(res.outfit_id, true, true);
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = `✅ 登録完了！（${modeLabel} / 全身 ${(res.full_size || []).join("x")}）`;
+                        statusEl.classList.remove("error");
+                    }
+                    resetFull();
+                    resetBust();
+                    setTimeout(closeModal, 900);
+                } catch (err) {
+                    if (statusEl) {
+                        statusEl.textContent = `❌ 通信エラー: ${err}`;
+                        statusEl.classList.add("error");
+                    }
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = origLabel;
+                }
+            });
         }
     }
 

@@ -12,12 +12,12 @@ NIA（ニア）用 衣装アセット自動生成スクリプト（アニメ特�
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import numpy as np
 import cv2
 from PIL import Image
-from rembg import new_session, remove
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTFITS_DIR = os.path.join(BASE_DIR, "frontend", "assets", "outfits")
@@ -163,70 +163,159 @@ def _estimate_bg_rgb(img_rgb: np.ndarray) -> tuple[float, float, float]:
     return float(med[0]), float(med[1]), float(med[2])
 
 
-def build_outfit(
-    outfit_id: str,
-    src_path: str,
-    session=None,
-    bust_ratio: float = 0.28,
-    bust_src_path: str | None = None,
-) -> tuple[str, str]:
-    """元画像から完全透過 full.png と、基準制服と顔サイズ一致の bust.png を生成して保存する。"""
-    if not os.path.exists(src_path):
-        raise FileNotFoundError(f"元画像が見つかりません: {src_path}")
+def _is_chroma_green_bg(bg_rgb: tuple[float, float, float]) -> bool:
+    """推定背景色がクロマキーグリーン（#00FF00系）かどうかを判定する。"""
+    r, g, b = bg_rgb
+    return g >= 135.0 and (g - max(r, b)) >= 48.0
+
+
+def _remove_chroma_green(img_rgb: np.ndarray, bg_rgb: tuple[float, float, float]) -> np.ndarray:
+    """
+    クロマキーグリーン背景（#00FF00系）を1pxのゴミ・緑スピルなしで完全透過する。
+    白服・黒髪・褐色肌・赤い瞳には緑優位度がほぼないため、毛束の隙間や指の間まで完璧に分離できる。
+    """
+    rgb = img_rgb.astype(np.float32)
+    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    max_rb = np.maximum(r, b)
+    bg_r, bg_g, bg_b = bg_rgb
+    bg_excess = max(60.0, bg_g - max(bg_r, bg_b))
+
+    # 緑優位度 (G - max(R, B)) と背景色からの距離で連続マットを算出
+    g_excess = g - max_rb
+    bg_vec = np.array([bg_r, bg_g, bg_b], dtype=np.float32)
+    bg_dist = np.linalg.norm(rgb - bg_vec, axis=2)
+
+    # 背景判定: g_excess が bg_excess の 48% 以上なら完全透過、18%〜48% は滑らかな半透明遷移
+    low_th = max(24.0, bg_excess * 0.16)
+    high_th = max(58.0, bg_excess * 0.46)
+    alpha_g = 1.0 - np.clip((g_excess - low_th) / max(1.0, high_th - low_th), 0.0, 1.0)
+
+    # 非常に暗い緑影（背景の少し暗い緑）も距離ベースで補助的に抜く
+    dark_green_bg = (g_excess > 28.0) & (g > 75.0) & (bg_dist < 135.0)
+    alpha = np.where(dark_green_bg, np.minimum(alpha_g, np.clip((bg_dist - 40.0) / 95.0, 0.0, 1.0)), alpha_g)
+    alpha = np.where(alpha < 0.06, 0.0, alpha)
+
+    # エッジの滑らかアンチエイリアス
+    alpha_blur = cv2.GaussianBlur(alpha, (3, 3), 0.55)
+    edge_zone = (alpha > 0.0) & (alpha < 0.98)
+    alpha = np.where(edge_zone, alpha_blur, alpha)
+    alpha = np.where(alpha < 0.04, 0.0, alpha)
+
+    # グリーン・スピル除去（Despill）：髪・白服・肌のフチに乗った緑反射を自然に中和
+    fg_bin = (alpha > 0.04).astype(np.uint8)
+    eroded_3 = cv2.erode(fg_bin, np.ones((3, 3), np.uint8), iterations=3)
+    spill_zone = (fg_bin > 0) & ((eroded_3 == 0) | (alpha < 0.99))
+
+    # 半透明境界から緑背景成分を引き算
+    a3 = alpha[:, :, None]
+    decontam = np.clip((rgb - (1.0 - a3) * bg_vec) / np.maximum(a3, 0.25), 0.0, 255.0)
+    clean = np.where((a3 > 0.0) & (a3 < 0.96), decontam, rgb)
+
+    # スピル帯で G > max(R, B) の余剰緑を max(R, B) へクランプして緑フチを完全消去
+    cr, cg, cb = clean[:, :, 0], clean[:, :, 1], clean[:, :, 2]
+    c_max_rb = np.maximum(cr, cb)
+    despilled_g = np.minimum(cg, c_max_rb)
+    # わずかな緑かぶりは境界帯全体で除去
+    clean[:, :, 1] = np.where(spill_zone & (cg > c_max_rb), despilled_g, cg)
+
+    out = np.zeros((img_rgb.shape[0], img_rgb.shape[1], 4), dtype=np.uint8)
+    out[:, :, :3] = np.clip(clean, 0.0, 255.0).astype(np.uint8)
+    out[:, :, 3] = np.clip(alpha * 255.0, 0.0, 255.0).astype(np.uint8)
+    out[out[:, :, 3] == 0, :3] = 0
+    return out
+
+
+def _cutout_pil_image(pil_img: Image.Image, session=None) -> tuple[np.ndarray, str, object]:
+    """
+    画像を自動判別して最適な方法で透過RGBAへ変換する。
+    1. 既に透過済みPNG（外周に十分な透明ピクセルあり）→ そのまま利用 ("pre_transparent")
+    2. クロマキーグリーン背景（#00FF00系）→ 超高精度クロマキー＋スピル除去 ("chroma_green")
+    3. 白背景等の通常背景 → アニメ特化AI `isnet-anime` ＋デフリンジ ("isnet_anime")
+    """
+    if pil_img.mode in ("RGBA", "LA"):
+        arr_rgba = np.array(pil_img.convert("RGBA"))
+        h, w = arr_rgba.shape[:2]
+        m = max(4, min(20, h // 30, w // 30))
+        corner_alpha = np.concatenate(
+            [
+                arr_rgba[:m, :m, 3].ravel(),
+                arr_rgba[:m, -m:, 3].ravel(),
+                arr_rgba[-m:, :m, 3].ravel(),
+                arr_rgba[-m:, -m:, 3].ravel(),
+            ]
+        )
+        if float(np.mean(corner_alpha < 20)) > 0.7:
+            return arr_rgba, "pre_transparent", session
+
+    pil_rgb = pil_img.convert("RGB")
+    arr_rgb = np.array(pil_rgb)
+    bg_rgb = _estimate_bg_rgb(arr_rgb)
+
+    if _is_chroma_green_bg(bg_rgb):
+        rgba = _remove_chroma_green(arr_rgb, bg_rgb=bg_rgb)
+        return rgba, "chroma_green", session
+
+    from rembg import new_session, remove
 
     if session is None:
         session = new_session("isnet-anime")
-
-    pil_in = Image.open(src_path).convert("RGB")
-    if outfit_id in FLIP_HORIZONTAL_IDS:
-        pil_in = pil_in.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-    bg_rgb = _estimate_bg_rgb(np.array(pil_in))
-
-    # isnet-anime で背景除去（ツインテール内側・腕の間・白い服の境界まで高精度分離）
-    pil_cut = remove(pil_in, session=session, post_process_mask=True)
+    pil_cut = remove(pil_rgb, session=session, post_process_mask=True)
     rgba = np.array(pil_cut.convert("RGBA"))
     rgba = _defringe_rgba(rgba, bg_rgb=bg_rgb)
+    return rgba, "isnet_anime", session
+
+
+def build_outfit_from_pil(
+    outfit_id: str,
+    full_pil: Image.Image,
+    *,
+    bust_pil_in: Image.Image | None = None,
+    bust_ratio: float = 0.28,
+    flip_horizontal: bool = False,
+    meta: dict | None = None,
+    session=None,
+) -> dict:
+    """PIL画像から完全透過 full.png / bust.png と meta.json を生成・保存する。"""
+    if flip_horizontal or outfit_id in FLIP_HORIZONTAL_IDS:
+        full_pil = full_pil.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if bust_pil_in is not None:
+            bust_pil_in = bust_pil_in.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+
+    rgba, bg_mode, session = _cutout_pil_image(full_pil, session=session)
     rgba = _crop_to_content(rgba, pad=12)
 
-    # 縦解像度を標準化（最大1400px）して描画負荷と鮮明さを両立
+    # 縦解像度を標準化（最大1600px: 2K〜4K原画の鮮明さを維持しつつ軽量化）
     h, w = rgba.shape[:2]
-    if h > 1400:
-        scale = 1400.0 / float(h)
+    if h > 1600:
+        scale = 1600.0 / float(h)
         nw = max(1, int(round(w * scale)))
-        nh = 1400
+        nh = 1600
         rgba = np.array(Image.fromarray(rgba, mode="RGBA").resize((nw, nh), Image.Resampling.LANCZOS))
         h, w = rgba.shape[:2]
 
     out_dir = os.path.join(OUTFITS_DIR, outfit_id)
     os.makedirs(out_dir, exist_ok=True)
-
     full_path = os.path.join(out_dir, "full.png")
     bust_path = os.path.join(out_dir, "bust.png")
 
     Image.fromarray(rgba, mode="RGBA").save(full_path, format="PNG")
 
-    # バストアップ専用の高解像度画像（--bust-src）が指定された場合はそれを直接透過利用（ネイティブ高精細）
-    if bust_src_path and os.path.exists(bust_src_path):
-        pil_b = Image.open(bust_src_path).convert("RGB")
-        if outfit_id in FLIP_HORIZONTAL_IDS:
-            pil_b = pil_b.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        bg_b = _estimate_bg_rgb(np.array(pil_b))
-        b_cut = remove(pil_b, session=session, post_process_mask=True)
-        b_rgba = _crop_to_content(_defringe_rgba(np.array(b_cut.convert("RGBA")), bg_rgb=bg_b), pad=8)
+    if bust_pil_in is not None:
+        b_rgba, _, session = _cutout_pil_image(bust_pil_in, session=session)
+        b_rgba = _crop_to_content(b_rgba, pad=8)
         bh, bw = b_rgba.shape[:2]
         scale_b = 840.0 / float(max(1, bh))
         bust_pil = Image.fromarray(b_rgba, mode="RGBA").resize(
             (max(1, int(round(bw * scale_b))), 840), Image.Resampling.LANCZOS
         )
     else:
-        # 基準制服 (825x840) と同じ「頭頂〜胸の途中」バストアップ構図・顔サイズに統一
-        bust_h = max(1, int(round(h * max(0.24, min(0.65, bust_ratio)))))
+        bust_h = max(1, int(round(h * max(0.22, min(0.65, bust_ratio)))))
         bust_crop = rgba[:bust_h, :]
         target_w = max(bust_crop.shape[1], int(round(bust_h * 0.98)))
         bust_canvas = np.zeros((bust_h, target_w, 4), dtype=np.uint8)
         x_off = (target_w - bust_crop.shape[1]) // 2
         bust_canvas[:, x_off : x_off + bust_crop.shape[1]] = bust_crop
-        if bust_h < 840:
+        if bust_h != 840:
             scale_b = 840.0 / float(bust_h)
             bust_pil = Image.fromarray(bust_canvas, mode="RGBA").resize(
                 (max(1, int(round(target_w * scale_b))), 840), Image.Resampling.LANCZOS
@@ -235,22 +324,72 @@ def build_outfit(
             bust_pil = Image.fromarray(bust_canvas, mode="RGBA")
     bust_pil.save(bust_path, format="PNG")
 
-    print(f"[OK] {outfit_id}: full={w}x{h} -> {full_path}, bust={bust_pil.width}x{bust_pil.height} -> {bust_path}")
-    return full_path, bust_path
+    if meta:
+        meta_path = os.path.join(out_dir, "meta.json")
+        save_meta = {
+            "id": outfit_id,
+            "name": str(meta.get("name") or f"✨ {outfit_id}"),
+            "short": str(meta.get("short") or meta.get("name") or outfit_id),
+            "genre": str(meta.get("genre") or "custom"),
+            "description": str(meta.get("description") or f"カスタム衣装 ({outfit_id})"),
+            "bg_mode": bg_mode,
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(save_meta, f, ensure_ascii=False, indent=2)
+
+    print(f"[OK] {outfit_id} ({bg_mode}): full={w}x{h} -> {full_path}, bust={bust_pil.width}x{bust_pil.height} -> {bust_path}")
+    return {
+        "outfit_id": outfit_id,
+        "bg_mode": bg_mode,
+        "full_path": full_path,
+        "bust_path": bust_path,
+        "full_size": [w, h],
+        "bust_size": [bust_pil.width, bust_pil.height],
+        "session": session,
+    }
+
+
+def build_outfit(
+    outfit_id: str,
+    src_path: str,
+    session=None,
+    bust_ratio: float = 0.28,
+    bust_src_path: str | None = None,
+    flip_horizontal: bool = False,
+    meta: dict | None = None,
+) -> tuple[str, str]:
+    """元画像ファイルから完全透過 full.png と、基準制服と顔サイズ一致の bust.png を生成して保存する。"""
+    if not os.path.exists(src_path):
+        raise FileNotFoundError(f"元画像が見つかりません: {src_path}")
+    full_pil = Image.open(src_path)
+    bust_pil_in = Image.open(bust_src_path) if (bust_src_path and os.path.exists(bust_src_path)) else None
+    res = build_outfit_from_pil(
+        outfit_id=outfit_id,
+        full_pil=full_pil,
+        bust_pil_in=bust_pil_in,
+        bust_ratio=bust_ratio,
+        flip_horizontal=flip_horizontal,
+        meta=meta,
+        session=session,
+    )
+    return res["full_path"], res["bust_path"]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="NIA 衣装アセット高精度透過ビルダー (isnet-anime)")
-    parser.add_argument("--id", help="登録する衣装ID（例: yukata, swimsuit, office）")
+    parser = argparse.ArgumentParser(description="NIA 衣装アセット高精度透過ビルダー (クロマキー緑自動判別 / isnet-anime)")
+    parser.add_argument("--id", help="登録する衣装ID（例: santa, halloween, bunny）")
     parser.add_argument("--src", help="全身元画像のパス（PNG/JPG）")
     parser.add_argument("--bust-src", help="バストアップ専用の高解像度元画像パス（任意・指定時はネイティブ高精細）")
     parser.add_argument("--bust-ratio", type=float, default=0.28, help="バストアップ切出し比率（既定 0.28 = 基準制服と顔サイズ完全一致）")
-    parser.add_argument("--rebuild-defaults", action="store_true", help="pajama / casual / maid を一括再生成")
+    parser.add_argument("--genre", default="custom", help="ジャンルID (school/casual/sport/swimwear/cosplay/custom)")
+    parser.add_argument("--name", default="", help="UI表示名（例: 🎅 サンタコスプレ）")
+    parser.add_argument("--flip", action="store_true", help="画像を左右反転する（和服の襟補正用）")
+    parser.add_argument("--rebuild-defaults", action="store_true", help="標準収録の全衣装を一括再生成")
     args = parser.parse_args()
 
-    session = new_session("isnet-anime")
-
     if args.rebuild_defaults:
+        from rembg import new_session
+        session = new_session("isnet-anime")
         for oid, spath in DEFAULT_SOURCES.items():
             build_outfit(oid, spath, session=session, bust_ratio=args.bust_ratio)
         return 0
@@ -259,12 +398,14 @@ def main() -> int:
         parser.print_help()
         return 1
 
+    meta = {"name": args.name, "genre": args.genre} if (args.name or args.genre != "custom") else None
     build_outfit(
         args.id.strip(),
         args.src.strip(),
-        session=session,
         bust_ratio=args.bust_ratio,
         bust_src_path=args.bust_src.strip() if args.bust_src else None,
+        flip_horizontal=bool(args.flip),
+        meta=meta,
     )
     return 0
 
