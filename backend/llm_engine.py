@@ -858,10 +858,6 @@ class LLMEngine:
             args["clear_accessories"] = True
         else:
             acc_map = [
-                ("cat_ears", ("猫耳", "ねこみみ", "ネコ耳")),
-                ("glasses", ("メガネ", "眼鏡", "めがね")),
-                ("headphones", ("ヘッドホン", "ヘッドフォン")),
-                ("ribbon", ("リボン", "りぼん")),
                 ("blush", ("赤面", "チーク", "照れ")),
             ]
             for acc_id, kws in acc_map:

@@ -2405,3 +2405,24 @@ body.mascot-mode .subtitle-box p.subtitle-sub {
     border-color: #38bdf8;
 }
 
+.affection-reset-btn {
+    background: transparent;
+    color: #fda4af;
+    border: 1px solid rgba(251, 113, 133, 0.35);
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    line-height: 15px;
+    padding: 0;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.affection-reset-btn:hover {
+    background: rgba(244, 63, 94, 0.28);
+    color: #fff;
+    border-color: #fb7185;
+}
+
+

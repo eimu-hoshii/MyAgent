@@ -258,17 +258,17 @@ class MemoryManager:
 
                 CREATE TABLE IF NOT EXISTS affection_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
-                    points INTEGER DEFAULT 0,
+                    points INTEGER DEFAULT 10,
                     pet_count INTEGER DEFAULT 0,
                     poke_count INTEGER DEFAULT 0,
                     chat_count INTEGER DEFAULT 0,
-                    last_interact_at REAL DEFAULT 0
+                    last_interact_at REAL DEFAULT 0,
+                    last_reset_date TEXT DEFAULT '',
+                    last_decay_at REAL DEFAULT 0
                 );
-                INSERT OR IGNORE INTO affection_state (id, points, pet_count, poke_count, chat_count, last_interact_at)
-                VALUES (1, 15, 0, 0, 0, 0);
                 """
             )
-            # 既存DBへの repeat_rule / evidences_json / session_key / memories意味ベクトル用カラム追加マイグレーション
+            # 既存DBへの repeat_rule / evidences_json / session_key / memories意味ベクトル / affection用カラム追加マイグレーション
             for ddl in (
                 "ALTER TABLE tasks ADD COLUMN repeat_rule TEXT DEFAULT 'none'",
                 "ALTER TABLE conversations ADD COLUMN evidences_json TEXT DEFAULT '[]'",
@@ -277,11 +277,21 @@ class MemoryManager:
                 "ALTER TABLE memories ADD COLUMN embedding BLOB",
                 "ALTER TABLE memories ADD COLUMN last_accessed REAL DEFAULT 0",
                 "ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0",
+                "ALTER TABLE affection_state ADD COLUMN last_reset_date TEXT DEFAULT ''",
+                "ALTER TABLE affection_state ADD COLUMN last_decay_at REAL DEFAULT 0",
             ):
                 try:
                     conn.execute(ddl)
                 except Exception:
                     pass
+
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO affection_state
+                    (id, points, pet_count, poke_count, chat_count, last_interact_at, last_reset_date, last_decay_at)
+                VALUES (1, 10, 0, 0, 0, 0, '', 0)
+                """
+            )
 
             # 旧バージョンの固定初期シードが残っている場合は整理する
             conn.execute(
@@ -1097,22 +1107,28 @@ class MemoryManager:
             res.append(d)
         return res
 
+    # 本日のデレ度（機嫌ゲージ）の基準値・時間減衰設定
+    AFFECTION_BASE_POINTS = 10
+    AFFECTION_MAX_POINTS = 100
+    AFFECTION_DECAY_INTERVAL_SEC = 1800  # 30分放置ごとに少しずつツンへ戻る
+    AFFECTION_DECAY_PER_STEP = 4
+
     @staticmethod
     def _calc_affection_tier(points: int) -> dict[str, Any]:
-        """親密度ポイントからレベル・称号・進捗率・口調デレ度指針を算出する。"""
+        """本日のデレ度ポイント (0〜100) からレベル・称号・進捗率・口調デレ度指針を算出する。"""
         tiers = [
-            (1, 0, 30, "警戒・ツン全開期", "基本はツン95%・デレ5%。塩対応だが実は気にかけている。"),
-            (2, 30, 80, "ツン強め相棒期", "ツン80%・デレ20%。口は悪いが信頼感を見せ始める。"),
-            (3, 80, 160, "素直になれないツンデレ期", "ツン60%・デレ40%。照れながら気遣いや褒め言葉を漏らす。"),
-            (4, 160, 300, "隠しきれないデレ期", "ツン40%・デレ60%。甘えや心配が隠せず素直に喜ぶことも多い。"),
-            (5, 300, 999999, "最愛パートナー期", "ツン25%・デレ75%。相変わらず少し強がりつつ、深く愛情を込めて寄り添う。"),
+            (1, 0, 20, "ツン全開", "基本はツン95%・デレ5%。塩対応だが実は気にかけている。"),
+            (2, 20, 40, "ツン強め", "ツン80%・デレ20%。口は悪いが信頼感を見せ始める。"),
+            (3, 40, 65, "照れツンデレ", "ツン60%・デレ40%。照れながら気遣いや褒め言葉を漏らす。"),
+            (4, 65, 85, "デレ隠しきれず", "ツン40%・デレ60%。甘えや心配が隠せず素直に喜ぶことも多い。"),
+            (5, 85, 101, "デレ全開", "ツン25%・デレ75%。相変わらず少し強がりつつ、深く愛情を込めて寄り添う。"),
         ]
-        p = max(0, int(points))
+        p = max(0, min(100, int(points)))
         for lv, low, high, title, hint in tiers:
             if p < high or lv == 5:
                 if lv == 5:
-                    progress = 100
-                    next_pts = p
+                    progress = max(0, min(100, int((p - low) * 100 / max(1, 100 - low))))
+                    next_pts = 100
                 else:
                     progress = max(0, min(100, int((p - low) * 100 / max(1, high - low))))
                     next_pts = high
@@ -1123,46 +1139,99 @@ class MemoryManager:
                     "next_level_points": next_pts,
                     "prompt_hint": hint,
                 }
-        return {"level": 1, "title": "警戒・ツン全開期", "progress_pct": 0, "next_level_points": 30, "prompt_hint": ""}
+        return {"level": 1, "title": "ツン全開", "progress_pct": 0, "next_level_points": 20, "prompt_hint": ""}
 
-    def get_affection_state(self) -> dict[str, Any]:
-        """現在の親密度ステータスを返す。"""
+    def get_affection_state(self, now_ts: float | None = None, today_str: str | None = None) -> dict[str, Any]:
+        """
+        本日のデレ度（ツン⇄デレ機嫌ゲージ）を返す。
+        - 日付が変わると自動的に Lv.1 (10pt / ツン全開) へリセット（累計ふれあい回数は保持）。
+        - 最終ふれあいから30分経過するごとに -4pt ずつツンへ自然減衰（下限 10pt）。
+        """
+        now = float(now_ts if now_ts is not None else time.time())
+        today = today_str or datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        base_pts = self.AFFECTION_BASE_POINTS
+
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM affection_state WHERE id = 1").fetchone()
-        if not row:
-            pts, pet_c, poke_c, chat_c, last_ts = 15, 0, 0, 0, 0.0
-        else:
-            pts = int(row["points"] or 0)
-            pet_c = int(row["pet_count"] or 0)
-            poke_c = int(row["poke_count"] or 0)
-            chat_c = int(row["chat_count"] or 0)
-            last_ts = float(row["last_interact_at"] or 0.0)
+            if not row:
+                pts, pet_c, poke_c, chat_c, last_ts = base_pts, 0, 0, 0, 0.0
+                last_date, last_decay = today, now
+            else:
+                pts = max(0, min(self.AFFECTION_MAX_POINTS, int(row["points"] or 0)))
+                pet_c = int(row["pet_count"] or 0)
+                poke_c = int(row["poke_count"] or 0)
+                chat_c = int(row["chat_count"] or 0)
+                last_ts = float(row["last_interact_at"] or 0.0)
+                last_date = str(row["last_reset_date"] or "")
+                last_decay = float(row["last_decay_at"] or last_ts or 0.0)
+
+                updated = False
+                # 1. 日付変更による自動リセット（毎朝ツンからスタート）
+                if not last_date:
+                    last_date = today
+                    last_decay = now
+                    updated = True
+                elif last_date != today:
+                    pts = base_pts
+                    last_date = today
+                    last_decay = now
+                    updated = True
+                # 2. 時間経過による自然減衰（30分ごとに -4pt、下限10pt）
+                elif pts > base_pts and last_decay > 0:
+                    elapsed = max(0.0, now - last_decay)
+                    steps = int(elapsed // self.AFFECTION_DECAY_INTERVAL_SEC)
+                    if steps > 0:
+                        pts = max(base_pts, pts - steps * self.AFFECTION_DECAY_PER_STEP)
+                        last_decay = last_decay + steps * self.AFFECTION_DECAY_INTERVAL_SEC
+                        updated = True
+
+                if updated:
+                    conn.execute(
+                        "UPDATE affection_state SET points = ?, last_reset_date = ?, last_decay_at = ? WHERE id = 1",
+                        (pts, last_date, last_decay),
+                    )
+
         tier = self._calc_affection_tier(pts)
         return {
             "points": pts,
+            "max_points": self.AFFECTION_MAX_POINTS,
             "pet_count": pet_c,
             "poke_count": poke_c,
             "chat_count": chat_c,
             "last_interact_at": last_ts,
+            "reset_date": last_date,
+            "decay_interval_min": self.AFFECTION_DECAY_INTERVAL_SEC // 60,
             **tier,
         }
 
-    def add_affection(self, delta: int, kind: str = "chat") -> dict[str, Any]:
-        """親密度を加算し、最新ステータスとレベルアップ有無を返す。"""
-        prev = self.get_affection_state()
-        new_pts = max(0, prev["points"] + int(delta))
+    def add_affection(self, delta: int, kind: str = "chat", now_ts: float | None = None) -> dict[str, Any]:
+        """本日のデレ度を加算（上限100）し、最新ステータスとレベルアップ有無を返す。"""
+        now = float(now_ts if now_ts is not None else time.time())
+        today = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        prev = self.get_affection_state(now_ts=now, today_str=today)
+        new_pts = max(0, min(self.AFFECTION_MAX_POINTS, prev["points"] + int(delta)))
         col_map = {"pet": "pet_count", "poke": "poke_count", "chat": "chat_count"}
         inc_col = col_map.get(kind, "chat_count")
-        now = time.time()
         with self._get_conn() as conn:
             conn.execute(
-                f"UPDATE affection_state SET points = ?, {inc_col} = {inc_col} + 1, last_interact_at = ? WHERE id = 1",
-                (new_pts, now),
+                f"UPDATE affection_state SET points = ?, {inc_col} = {inc_col} + 1, last_interact_at = ?, last_reset_date = ?, last_decay_at = ? WHERE id = 1",
+                (new_pts, now, today, now),
             )
-        after = self.get_affection_state()
+        after = self.get_affection_state(now_ts=now, today_str=today)
         after["delta"] = int(delta)
         after["leveled_up"] = after["level"] > prev["level"]
         return after
+
+    def reset_affection_mood(self) -> dict[str, Any]:
+        """本日のデレ度を手動で初期ツン状態 (10pt / Lv.1) へ戻す（累計ふれあい回数は保持）。"""
+        now = time.time()
+        today = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE affection_state SET points = ?, last_reset_date = ?, last_decay_at = ? WHERE id = 1",
+                (self.AFFECTION_BASE_POINTS, today, now),
+            )
+        return self.get_affection_state(now_ts=now, today_str=today)
 
 
 memory_manager = MemoryManager()

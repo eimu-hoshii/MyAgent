@@ -144,7 +144,7 @@ flowchart LR
   - **🧠 長期記憶**: 手動追加 (`＋追加`)、一括消去に加え、**意味検索欄 (`🔍 意味検索`)** から文字一致なしでも類似記憶（`類似 XX%`）を検索可能。**`🧹整理`** ボタン（または30分以上アイドル時の自動睡眠統合）で重複記憶を自動マージ整理します。
   - **📅 予定・監視タスク**: 単発および繰り返しリマインダー (`none` / `hourly` / `daily` / `weekly`) の登録・完了・スヌーズ。
 - **中央ステージ**:
-  - **ワードローブ ＆ ふれあいバー (`.wardrobe-bar`)**: 好感度ゲージ (`Lv.1〜Lv.5`)・時間帯/天気チップ・`✋ ふれあいON ⇄ ✥ 位置移動` トグル・4衣装切替 (`制服` / `パジャマ` / `私服` / `メイド服`)・5種アクセサリー着脱 (`🐱猫耳` / `👓メガネ` / `🎧ヘッドホン` / `🎀リボン` / `🌸チーク`)。
+  - **ワードローブ ＆ ふれあいバー (`.wardrobe-bar`)**: 本日のデレ度ゲージ (`Lv.1〜Lv.5`, 日付変更リセット・30分放置自然減衰・`↺` 手動ツン戻し対応)・時間帯/天気チップ・`✋ ふれあいON ⇄ ✥ 位置移動` トグル・4衣装切替 (`制服` / `パジャマ` / `私服` / `メイド服`)・`😳 照れチーク` ON/OFF。新規衣装は `python scripts/build_outfit_assets.py --id <ID> --src <画像>` でAI完全透過アセットを自動生成可能。
   - **ふれあいインタラクション**: `✋ ふれあいON` 時は頭部ドラッグで「なでなで」（ハート演出＋照れ音声＋好感度+5）、頬クリックで「つつく」（驚き＋キラキラ＋好感度+2）。位置移動したい場合は `✥ 位置移動` へ切替または `Shift + 左ドラッグ`。
   - 立ち絵の拡大縮小（ホイール）・全身/顔切替・2.5D呼吸＆カーソル傾き追従・時間帯/天気背景ライティング（OBS/マスコット透過時は自動無効）・表情/口形手動確認（`フル管制` 時）。
   - **ファイル D&D 解析**: `.txt`, `.md`, 画像, `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.mp3`/`.wav` 等を中央ステージへドロップして即座に解析・要約。
@@ -236,7 +236,7 @@ flowchart LR
 | `GET /api/memories/semantic`, `POST /api/memories/consolidate` | 意味ベクトル記憶検索 / 睡眠統合（重複マージ＆整理）即時実行 |
 | `POST /api/mascot/toggle`, `POST /api/speech/stop`, `POST /api/voice/mute` | マスコット起動停止 / 発話停止 / ミュートトグル |
 | `POST /api/engines/aivisspeech/start` | AivisSpeech の二重起動防止付きバックグラウンド裏起動・GUI裏格納 |
-| `GET /api/outfits`, `POST /api/appearance`, `POST /api/interact` | 衣装/アクセ一覧取得 / 衣装・アクセ変更反映 / なでなで・つつき反応＆好感度更新 |
+| `GET /api/outfits`, `POST /api/appearance`, `POST /api/interact`, `POST /api/affection/reset` | 衣装一覧取得 / 衣装・チーク変更 / ふれあい反応 / 本日のデレ度をLv.1ツンへ手動リセット |
 | `POST /api/vision_analyze`, `/api/clipboard_analyze`, `/api/upload_analyze` | 画面解析・クリップボード・ファイルアップロード解析 |
 | `GET/POST/DELETE /api/agent/workflows...` | 定時自律ワークフロー登録・即時実行・切替・削除 |
 | `POST /api/agent/rag/reindex`, `GET /api/agent/rag/search` | ローカル RAG インデックス更新 / 検索 |

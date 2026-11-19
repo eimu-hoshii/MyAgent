@@ -224,12 +224,8 @@ OUTFIT_CATALOG: dict[str, dict[str, str]] = {
     },
 }
 
-# Canvas重ね合わせアクセサリーカタログ
+# Canvas重ね合わせエフェクトカタログ（立ち絵品質を損なうベクター小物は廃止し照れチークのみ）
 ACCESSORY_CATALOG: dict[str, dict[str, str]] = {
-    "cat_ears": {"id": "cat_ears", "name": "🐱 猫耳"},
-    "glasses": {"id": "glasses", "name": "👓 メガネ"},
-    "headphones": {"id": "headphones", "name": "🎧 ヘッドホン"},
-    "ribbon": {"id": "ribbon", "name": "🎀 赤リボン"},
     "blush": {"id": "blush", "name": "😳 照れチーク"},
 }
 

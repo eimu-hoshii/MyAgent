@@ -277,9 +277,9 @@ export class AvatarRenderer {
         this.activeOutfit = nextId;
         if (nextId !== "default" && !this.outfitImages[nextId]) {
             const bust = new Image();
-            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=1`;
+            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=2`;
             const full = new Image();
-            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=1`;
+            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=2`;
             this.outfitImages[nextId] = { bust, full };
         }
         if (changed && withSparkle) {
@@ -685,7 +685,7 @@ export class AvatarRenderer {
     }
 
     /**
-     * 装着中のアクセサリー（猫耳・メガネ・ヘッドホン・赤リボン・照れチーク）と感情記号をキャラ座標へ重ね描画する。
+     * 照れチーク（blush）と感情連動の漫画記号をキャラ座標へ重ね描画する。
      */
     _drawAccessoriesAndMarks(ctx, headX, headY, headR, now) {
         const acc = new Set(this.activeAccessories || []);
@@ -710,105 +710,7 @@ export class AvatarRenderer {
             }
         }
 
-        // 2. インテリメガネ (glasses)
-        if (acc.has("glasses")) {
-            const eyeY = headY + headR * 0.08;
-            const lensW = headR * 0.38;
-            const lensH = headR * 0.21;
-            const gap = headR * 0.11;
-            ctx.strokeStyle = "#dc2626";
-            ctx.lineWidth = Math.max(2, headR * 0.032);
-            ctx.fillStyle = "rgba(224, 242, 254, 0.16)";
-            for (const side of [-1, 1]) {
-                const lx = side < 0 ? headX - gap - lensW : headX + gap;
-                ctx.beginPath();
-                ctx.roundRect(lx, eyeY - lensH / 2, lensW, lensH, headR * 0.06);
-                ctx.fill();
-                ctx.stroke();
-            }
-            ctx.beginPath();
-            ctx.moveTo(headX - gap, eyeY - lensH * 0.08);
-            ctx.lineTo(headX + gap, eyeY - lensH * 0.08);
-            ctx.stroke();
-        }
-
-        // 3. 猫耳カチューシャ (cat_ears)
-        if (acc.has("cat_ears")) {
-            for (const side of [-1, 1]) {
-                const baseX = headX + side * headR * 0.56;
-                const baseY = headY - headR * 0.72;
-                const tipX = headX + side * headR * 0.86;
-                const tipY = headY - headR * 1.36;
-                const outerX = headX + side * headR * 0.96;
-                const outerY = headY - headR * 0.52;
-                ctx.fillStyle = "#18181b";
-                ctx.strokeStyle = "#f43f5e";
-                ctx.lineWidth = Math.max(1.8, headR * 0.025);
-                ctx.beginPath();
-                ctx.moveTo(baseX, baseY);
-                ctx.lineTo(tipX, tipY);
-                ctx.lineTo(outerX, outerY);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.fillStyle = "rgba(251, 113, 133, 0.85)";
-                ctx.beginPath();
-                ctx.moveTo(baseX + side * headR * 0.08, baseY - headR * 0.03);
-                ctx.lineTo(tipX - side * headR * 0.04, tipY + headR * 0.17);
-                ctx.lineTo(outerX - side * headR * 0.09, outerY - headR * 0.04);
-                ctx.closePath();
-                ctx.fill();
-            }
-        }
-
-        // 4. ゲーミングヘッドホン (headphones)
-        if (acc.has("headphones")) {
-            ctx.strokeStyle = "#0f172a";
-            ctx.lineWidth = Math.max(5, headR * 0.11);
-            ctx.beginPath();
-            ctx.arc(headX, headY - headR * 0.06, headR * 1.06, Math.PI * 1.08, Math.PI * 1.92);
-            ctx.stroke();
-            ctx.strokeStyle = "#38bdf8";
-            ctx.lineWidth = Math.max(2, headR * 0.035);
-            ctx.beginPath();
-            ctx.arc(headX, headY - headR * 0.06, headR * 1.06, Math.PI * 1.15, Math.PI * 1.85);
-            ctx.stroke();
-            for (const side of [-1, 1]) {
-                const ex = headX + side * headR * 1.02;
-                const ey = headY + headR * 0.06;
-                ctx.fillStyle = "#0f172a";
-                ctx.strokeStyle = "#38bdf8";
-                ctx.lineWidth = Math.max(2, headR * 0.03);
-                ctx.beginPath();
-                ctx.roundRect(ex - headR * 0.13, ey - headR * 0.28, headR * 0.26, headR * 0.56, headR * 0.1);
-                ctx.fill();
-                ctx.stroke();
-            }
-        }
-
-        // 5. ツイン赤リボン (ribbon)
-        if (acc.has("ribbon")) {
-            for (const side of [-1, 1]) {
-                const rx = headX + side * headR * 0.92;
-                const ry = headY - headR * 0.56;
-                ctx.fillStyle = "#e11d48";
-                ctx.strokeStyle = "#fff1f2";
-                ctx.lineWidth = Math.max(1.2, headR * 0.018);
-                ctx.beginPath();
-                ctx.moveTo(rx, ry);
-                ctx.lineTo(rx + side * headR * 0.34, ry - headR * 0.2);
-                ctx.lineTo(rx + side * headR * 0.32, ry + headR * 0.18);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.arc(rx, ry, headR * 0.09, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        // 6. 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間表示）
+        // 2. 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間表示）
         const emoAge = now - this.emotionTriggerTime;
         if (emoAge < 2200) {
             const fade = Math.min(1, (2200 - emoAge) / 500);

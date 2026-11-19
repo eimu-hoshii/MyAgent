@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=9";
+import { AvatarRenderer } from "./avatar.js?v=10";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -576,6 +576,14 @@ class AgentController {
                 this.avatar.setPointerMode(nextMode);
                 pointerModeBtn.classList.toggle("active", nextMode === "interact");
                 pointerModeBtn.textContent = nextMode === "interact" ? "✋ ふれあいON" : "✥ 位置移動モード";
+            });
+        }
+        const affectionResetBtn = document.getElementById("btn-affection-reset");
+        if (affectionResetBtn) {
+            affectionResetBtn.addEventListener("click", async () => {
+                try {
+                    await fetch("/api/affection/reset", { method: "POST" });
+                } catch (_) {}
             });
         }
 
@@ -2996,8 +3004,12 @@ class AgentController {
             const aff = state.affection;
             const txt = document.getElementById("affection-text");
             const fill = document.getElementById("affection-fill");
-            if (txt) txt.textContent = `❤️ Lv.${aff.level} ${aff.title} (${aff.points}pt)`;
+            const pill = document.getElementById("affection-pill");
+            if (txt) txt.textContent = `❤️ Lv.${aff.level} ${aff.title} (${aff.points}/${aff.max_points || 100})`;
             if (fill) fill.style.width = `${Math.max(4, Math.min(100, Number(aff.progress_pct) || 0))}%`;
+            if (pill) {
+                pill.title = `本日のデレ度（日付変更でLv.1ツンへ自動リセット・${aff.decay_interval_min || 30}分放置ごとに自然減衰） / 累計: なでなで${aff.pet_count || 0}回・つつき${aff.poke_count || 0}回・会話${aff.chat_count || 0}回`;
+            }
         }
 
         // 衣装ボタン描画

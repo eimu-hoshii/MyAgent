@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=24" />
+    <link rel="stylesheet" href="/css/style.css?v=25" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -235,12 +235,13 @@
                 </div>
             </div>
 
-            <!-- クローゼット（着せ替え衣装・アクセサリー）・親密度・ふれあいバー -->
+            <!-- クローゼット（着せ替え衣装）・本日のデレ度・ふれあいバー -->
             <div class="wardrobe-bar obs-hide">
                 <div class="wardrobe-row">
-                    <div id="affection-pill" class="affection-pill" title="会話・なでなで・つつきで親密度（デレ度）が上がります">
-                        <span id="affection-text">❤️ Lv.1 ツン全開 (15pt)</span>
+                    <div id="affection-pill" class="affection-pill" title="本日のデレ度（日付が変わるとLv.1ツン全開にリセット、30分放置でも少しずつツンに戻ります）">
+                        <span id="affection-text">❤️ Lv.1 ツン全開 (10/100)</span>
                         <div class="affection-track"><div id="affection-fill" class="affection-fill" style="width: 50%"></div></div>
+                        <button type="button" id="btn-affection-reset" class="affection-reset-btn" title="本日のデレ度をLv.1（ツン全開）へ戻す">↺</button>
                     </div>
                     <span id="env-weather-pill" class="env-pill" title="現在の時間帯・天気連動背景演出">☀️ 昼</span>
                     <button type="button" id="btn-pointer-mode" class="pointer-mode-btn active" title="キャラ上をなでて頭なでなで / クリックでほっぺつつき（Shift+ドラッグで位置移動）">
@@ -249,7 +250,7 @@
                 </div>
                 <div class="wardrobe-row">
                     <div id="outfit-btn-group" class="outfit-btn-group" title="クリックで即お着替え"></div>
-                    <div id="accessory-btn-group" class="accessory-btn-group" title="アクセサリー重ね着ON/OFF"></div>
+                    <div id="accessory-btn-group" class="accessory-btn-group" title="照れチークON/OFF"></div>
                 </div>
             </div>
 
@@ -986,6 +987,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=28"></script>
+    <script type="module" src="/js/app.js?v=29"></script>
 </body>
 </html>

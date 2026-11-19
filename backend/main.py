@@ -548,6 +548,14 @@ async def interact_avatar_api(payload: dict[str, Any] = Body(...)) -> dict[str, 
     return await orchestrator.handle_avatar_interaction(kind=kind)
 
 
+@app.post("/api/affection/reset")
+async def reset_affection_api() -> dict[str, Any]:
+    """本日のデレ度を手動で初期ツン状態 (Lv.1 / 10pt) へ戻す（累計ふれあい回数は保持）。"""
+    aff = memory_manager.reset_affection_mood()
+    await orchestrator.broadcast_appearance_state()
+    return {"ok": True, "affection": aff}
+
+
 @app.post("/api/tasks")
 async def add_task_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """UIからカレンダー予定・タスク・リマインダーを追加する。"""
