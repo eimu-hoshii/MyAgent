@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=11";
+import { AvatarRenderer } from "./avatar.js?v=12";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",

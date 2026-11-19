@@ -277,9 +277,9 @@ export class AvatarRenderer {
         this.activeOutfit = nextId;
         if (nextId !== "default" && !this.outfitImages[nextId]) {
             const bust = new Image();
-            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=3`;
+            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=4`;
             const full = new Image();
-            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=3`;
+            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=4`;
             this.outfitImages[nextId] = { bust, full };
         }
         if (changed && withSparkle) {
