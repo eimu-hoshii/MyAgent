@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=27" />
+    <link rel="stylesheet" href="/css/style.css?v=28" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -249,8 +249,8 @@
                     <div class="outfit-picker-group">
                         <select id="select-outfit-genre" class="outfit-select" title="衣装ジャンルを選択"></select>
                         <select id="select-outfit-item" class="outfit-select" title="着替える衣装を選択"></select>
-                        <button type="button" id="btn-open-outfit-modal" class="outfit-add-btn" title="Nano Banana Pro等で生成した衣装画像をワンクリック自動透過登録（クロマキー緑 #00FF00 対応）">
-                            ➕ 衣装追加
+                        <button type="button" id="btn-open-outfit-modal" class="outfit-add-btn" title="衣装の新規追加・サムネイル一覧からのジャンル/名前編集・Nano Banana Proテンプレート">
+                            👗 衣装管理
                         </button>
                     </div>
                 </div>
@@ -989,33 +989,39 @@
         </div>
     </div>
 
-    <!-- カスタム衣装ワンクリック追加＆Nano Banana Proプロンプト生成モーダル -->
+    <!-- 衣装管理（新規ワンクリック追加 ＆ サムネイル一覧編集）モーダル -->
     <div id="outfit-upload-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="outfit-modal-title">
         <div class="modal-dialog outfit-modal-dialog">
             <div class="modal-header">
-                <h2 id="outfit-modal-title">👗 衣装ワンクリック登録 ＆ Nano Banana Pro テンプレート</h2>
+                <h2 id="outfit-modal-title">👗 クローゼット管理（追加・一覧編集）</h2>
                 <button type="button" id="btn-close-outfit-modal" class="modal-close-btn" aria-label="閉じる">✕</button>
             </div>
-            <div class="modal-body outfit-modal-body">
+            <div class="outfit-modal-tabs">
+                <button type="button" class="outfit-tab-btn active" data-outfit-tab="add">➕ 新規衣装を追加</button>
+                <button type="button" class="outfit-tab-btn" data-outfit-tab="manage">🖼️ 衣装一覧・ジャンル/名前編集</button>
+            </div>
+
+            <!-- タブ1: 新規追加 -->
+            <div id="outfit-tab-add" class="modal-body outfit-modal-body">
                 <!-- Step 1: Nano Banana Pro 用プロンプトビルダー -->
                 <div class="outfit-template-box">
                     <div class="outfit-box-head">
-                        <span>📋 Step 1: Nano Banana Pro 用コピペプロンプト（純緑クロマキー <code>#00FF00</code> 背景指定）</span>
-                        <button type="button" id="btn-copy-nbp-prompt" class="mini-btn accent">📋 プロンプトをコピー</button>
+                        <span class="outfit-box-title">📋 Step 1: Nano Banana Pro プロンプト（<code>#00FF00</code> 緑背景）</span>
+                        <button type="button" id="btn-copy-nbp-prompt" class="mini-btn accent nowrap-btn">📋 コピー</button>
                     </div>
                     <p class="outfit-hint">
-                        Gemini (Nano Banana Pro) に <code>picture/黒ブレザー版キャラクターリファレンスシート.png</code> を添付し、下のプロンプトを貼り付けて生成→保存してください。
+                        Gemini (Nano Banana Pro) に <code>picture/通常.jpg</code> を添付して下のプロンプトを貼り付けてください。顔・髪・ポーズ固定で生成すると<strong>口パク・瞬き・6感情が自動連動</strong>します！
                     </p>
                     <div class="outfit-preset-chips">
-                        <button type="button" class="nbp-chip" data-name="🎅 サンタコスプレ" data-genre="cosplay" data-outfit="Cute Christmas Santa cosplay: crimson red velvet Santa mini dress trimmed with fluffy white faux-fur along the neckline, cuffs, and skirt hem, black waist belt with gold buckle, cute mini Santa hat perched on her head, white over-knee socks, and red fur-trimmed ankle boots">🎅 サンタ</button>
-                        <button type="button" class="nbp-chip" data-name="🎃 ハロウィン魔女" data-genre="cosplay" data-outfit="Cute Halloween gothic witch cosplay: black and deep-crimson ruffled gothic witch dress with lace trim, cute pointed mini witch hat perched on her head, striped dark thigh-high socks, and black lace-up boots">🎃 ハロウィン</button>
-                        <button type="button" class="nbp-chip" data-name="🐰 ステージバニー" data-genre="cosplay" data-outfit="Stylish cute anime stage-idol bunny cosplay: black tuxedo-style bunny mini dress with white shirt collar, crimson bow tie, black bunny-ear headband, white cuffs, dark sheer tights, and black heels">🐰 バニー</button>
-                        <button type="button" class="nbp-chip" data-name="⛵ 夏服セーラー(ルーズ)" data-genre="school" data-outfit="Classic Japanese summer sailor uniform: crisp white short-sleeve sailor blouse with black collar and white stripes, red ribbon tie, pleated black mini skirt, chunky slouchy white loose socks (ルーズソックス) gathered around the ankles, and black school loafers">⛵ ルーズ夏セーラー</button>
-                        <button type="button" class="nbp-chip" data-name="🏖️ フリルビキニ水着" data-genre="swimwear" data-outfit="Cute stylish resort off-shoulder ruffled flare bikini swimwear in black and crimson plaid with white lace trim, matching ruffled swim skirt bottoms, barefoot">🏖️ フリル水着</button>
+                        <button type="button" class="nbp-chip" data-name="🎅 サンタコスプレ" data-genre="cosplay" data-outfit="赤いベルベットのサンタミニワンピース（白いふわふわファー縁取り・黒ベルト・ミニサンタ帽・白ニーハイ・赤ブーツ）">🎅 サンタ</button>
+                        <button type="button" class="nbp-chip" data-name="🎃 ハロウィン魔女" data-genre="cosplay" data-outfit="黒と深紅のゴシック魔女ワンピース（レース装飾・ミニ魔女帽子・黒ボーダーニーハイ・編み上げブーツ）">🎃 ハロウィン</button>
+                        <button type="button" class="nbp-chip" data-name="🐰 ステージバニー" data-genre="cosplay" data-outfit="黒のタキシード風ステージアイドルバニーミニドレス（白襟・赤蝶ネクタイ・黒うさ耳カチューシャ・白カフス・黒タイツ・黒ヒール）">🐰 バニー</button>
+                        <button type="button" class="nbp-chip" data-name="⛵ 夏服セーラー(ルーズ)" data-genre="school" data-outfit="白の半袖夏服セーラー服（黒襟に白2本ライン・赤いリボンタイ・黒プリーツミニスカート・ボリュームのある白ルーズソックス・黒ローファー）">⛵ ルーズ夏セーラー</button>
+                        <button type="button" class="nbp-chip" data-name="🏖️ フリルビキニ水着" data-genre="swimwear" data-outfit="黒と赤チェックのオフショルダー・フリルリゾート水着（白レース縁取り・フリルミニスカート付きボトム・裸足）">🏖️ フリル水着</button>
                     </div>
                     <label class="modal-field compact">
-                        <span>衣装の指定（日本語でも英語でも可・入力すると下のプロンプトへ自動反映）</span>
-                        <input type="text" id="input-nbp-outfit-desc" placeholder="例: Cute Christmas Santa cosplay..." />
+                        <span>変更したい服装の内容（入力すると下のプロンプトへ自動反映）</span>
+                        <input type="text" id="input-nbp-outfit-desc" placeholder="例: 赤いベルベットのサンタミニワンピース..." />
                     </label>
                     <textarea id="textarea-nbp-prompt" rows="4" readonly></textarea>
                 </div>
@@ -1023,7 +1029,7 @@
                 <!-- Step 2: 画像アップロード＆自動透過登録 -->
                 <div class="outfit-upload-box">
                     <div class="outfit-box-head">
-                        <span>✨ Step 2: 生成画像をアップロード（クロマキー緑 #00FF00 / 白背景 / 透過PNG 自動判別）</span>
+                        <span class="outfit-box-title">✨ Step 2: 画像を登録（クロマキー緑 / 白背景 / 透過PNG 自動判別）</span>
                     </div>
                     <div class="outfit-upload-grid">
                         <label class="outfit-dropzone" id="dropzone-outfit-full">
@@ -1035,7 +1041,7 @@
                         <label class="outfit-dropzone optional" id="dropzone-outfit-bust">
                             <input type="file" id="input-outfit-bust-file" accept="image/*" hidden />
                             <div id="preview-outfit-bust" class="outfit-preview-box">
-                                <span>🙂 バストアップ専用画像<br>（任意・2K以上の全身なら不要）</span>
+                                <span>🙂 バストアップ専用画像<br>（任意・通常は空欄でOK）</span>
                             </div>
                         </label>
                     </div>
@@ -1053,21 +1059,34 @@
                             </select>
                         </label>
                         <label class="modal-field compact">
-                            <span>衣装名（表示名）</span>
+                            <span>衣装名 (表示名)</span>
                             <input type="text" id="input-outfit-name" placeholder="例: 🎅 サンタコスプレ" />
                         </label>
                         <label class="modal-field compact">
-                            <span>衣装ID（空欄で自動 / 既存IDで上書き）</span>
-                            <input type="text" id="input-outfit-id" placeholder="例: santa, sailor" />
+                            <span>衣装ID (任意・上書き用)</span>
+                            <input type="text" id="input-outfit-id" placeholder="空欄で自動生成" />
                         </label>
                     </div>
-                    <label class="checkbox-row compact">
-                        <input type="checkbox" id="input-outfit-flip" />
-                        <span>左右反転して登録する（浴衣・着物などの襟合わせ補正用）</span>
-                    </label>
+                    <div class="outfit-check-row">
+                        <label class="checkbox-row compact">
+                            <input type="checkbox" id="input-outfit-face-sync" checked />
+                            <span>🗣️ 口パク・瞬き・6感情を自動連動（<code>通常.jpg</code>ベース生成時に顔を自動位置合わせ）</span>
+                        </label>
+                        <label class="checkbox-row compact">
+                            <input type="checkbox" id="input-outfit-flip" />
+                            <span>↔️ 左右反転する（浴衣・着物の襟合わせ補正用）</span>
+                        </label>
+                    </div>
                     <div id="outfit-upload-status" class="outfit-upload-status"></div>
                 </div>
             </div>
+
+            <!-- タブ2: サムネイル一覧・ジャンル/名前編集 -->
+            <div id="outfit-tab-manage" class="modal-body outfit-modal-body hidden">
+                <div id="outfit-manage-status" class="outfit-upload-status"></div>
+                <div id="outfit-manage-grid" class="outfit-manage-grid"></div>
+            </div>
+
             <div class="modal-footer">
                 <button type="button" id="btn-cancel-outfit-modal" class="modal-btn cancel">閉じる</button>
                 <button type="button" id="btn-submit-outfit-upload" class="modal-btn save">✨ 自動透過して登録＆着替え</button>
@@ -1075,6 +1094,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=32"></script>
+    <script type="module" src="/js/app.js?v=33"></script>
 </body>
 </html>

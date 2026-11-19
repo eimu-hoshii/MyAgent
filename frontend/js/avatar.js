@@ -271,10 +271,14 @@ export class AvatarRenderer {
         this.canvas.style.cursor = this.pointerMode === "pan" ? "grab" : "pointer";
     }
 
-    setOutfit(outfitId, withSparkle = true, forceReload = false) {
+    setOutfit(outfitId, withSparkle = true, forceReload = false, faceSync = null) {
         const nextId = (outfitId || "default").trim().toLowerCase();
         const changed = this.activeOutfit !== nextId;
         this.activeOutfit = nextId;
+        if (!this.outfitMeta) this.outfitMeta = {};
+        if (typeof faceSync === "boolean") {
+            this.outfitMeta[nextId] = { ...(this.outfitMeta[nextId] || {}), faceSync };
+        }
         if (nextId !== "default" && (forceReload || !this.outfitImages[nextId])) {
             const bust = new Image();
             const q = forceReload ? `t=${Date.now()}` : "v=5";
@@ -817,10 +821,40 @@ export class AvatarRenderer {
             const drawY = -drawH / 2 + (this.viewMode === "full" ? 6 : 12);
             ctx.drawImage(img, drawX, drawY, drawW, drawH);
 
+            // 標準立ち絵ベース衣装（faceSync=true）は基準制服の瞬き・6感情・あいうえお口パクをそのまま重ね描画
+            const isFaceSync = !!(this.outfitMeta && this.outfitMeta[this.activeOutfit]?.faceSync);
+            if (isFaceSync && sprite && sprite.complete && sprite.naturalWidth > 0) {
+                const needOverlay =
+                    this.currentEmotion !== "normal" || eyeState !== "open" || vowel !== "normal";
+                if (needOverlay) {
+                    const sx = 265;
+                    const sy = 340;
+                    const sw = 310;
+                    const sh = 185;
+                    if (this.viewMode === "full") {
+                        const fullCropX = 497.0 + sx * (701.0 / 825.0);
+                        const fullCropY = 35.0 + (sy + 4.0) * (714.0 / 840.0);
+                        const fullCropW = sw * (701.0 / 825.0);
+                        const fullCropH = sh * (714.0 / 840.0);
+                        const dx = drawX + (fullCropX / 1696.0) * drawW;
+                        const dy = drawY + (fullCropY / 2528.0) * drawH;
+                        const dw = (fullCropW / 1696.0) * drawW;
+                        const dh = (fullCropH / 2528.0) * drawH;
+                        ctx.drawImage(sprite, sx, sy, sw, sh, dx, dy, dw, dh);
+                    } else {
+                        const dx = drawX + (sx / 825.0) * drawW;
+                        const dy = drawY + (sy / 840.0) * drawH;
+                        const dw = (sw / 825.0) * drawW;
+                        const dh = (sh / 840.0) * drawH;
+                        ctx.drawImage(sprite, sx, sy, sw, sh, dx, dy, dw, dh);
+                    }
+                }
+            }
+
             // 新衣装用の顔中心・半径を比率算出
             headX = 0;
-            headY = drawY + drawH * (this.viewMode === "full" ? 0.125 : 0.22);
-            headR = drawW * (this.viewMode === "full" ? 0.23 : 0.225);
+            headY = drawY + drawH * (this.viewMode === "full" ? 0.135 : 0.45);
+            headR = drawW * (this.viewMode === "full" ? 0.18 : 0.19);
         } else if (this.viewMode === "full") {
             const fullImg = this.fullSprites[this.currentEmotion] || this.fullSprites["normal"];
             if (fullImg && fullImg.complete && fullImg.naturalWidth > 0) {

@@ -15,6 +15,7 @@ import datetime
 import email.utils
 import html
 import io
+import json
 import os
 import platform
 import re
@@ -72,6 +73,7 @@ def list_available_outfits() -> list[dict[str, Any]]:
                 "id": oid,
                 "genre": gid,
                 "genre_name": genre_names.get(gid, "📁 カスタム追加"),
+                "face_sync": bool(merged.get("face_sync", False)),
                 "available": available,
                 "is_custom": False,
             }
@@ -95,6 +97,7 @@ def list_available_outfits() -> list[dict[str, Any]]:
                         "short": str(cm.get("short") or disp_name),
                         "description": str(cm.get("description") or f"カスタム追加衣装 ({entry})"),
                         "bg_mode": str(cm.get("bg_mode") or ""),
+                        "face_sync": bool(cm.get("face_sync", False)),
                         "available": True,
                         "is_custom": True,
                     }

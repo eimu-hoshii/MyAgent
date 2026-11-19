@@ -573,6 +573,7 @@ async def upload_custom_outfit_api(payload: dict[str, Any] = Body(...)) -> dict[
     description = str(payload.get("description", "") or "").strip()[:160] or f"カスタム登録衣装 ({name})"
     bust_ratio = max(0.22, min(0.65, float(payload.get("bust_ratio", 0.28) or 0.28)))
     flip_horizontal = bool(payload.get("flip_horizontal", False))
+    face_sync = bool(payload.get("face_sync", True))
 
     try:
         full_bytes = base64.b64decode(full_b64)
@@ -601,6 +602,7 @@ async def upload_custom_outfit_api(payload: dict[str, Any] = Body(...)) -> dict[
             bust_pil_in=bust_pil_in,
             bust_ratio=bust_ratio,
             flip_horizontal=flip_horizontal,
+            face_sync=face_sync,
             meta={"name": name, "short": name, "genre": genre, "description": description},
         )
     except Exception as exc:
@@ -615,10 +617,52 @@ async def upload_custom_outfit_api(payload: dict[str, Any] = Body(...)) -> dict[
         "ok": True,
         "outfit_id": safe_id,
         "bg_mode": build_res.get("bg_mode", ""),
+        "face_sync": bool(build_res.get("face_sync", False)),
         "full_size": build_res.get("full_size", []),
         "bust_size": build_res.get("bust_size", []),
         **state,
     }
+
+
+@app.patch("/api/outfits/{outfit_id}")
+async def update_outfit_meta_api(outfit_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """登録済み衣装の表示名・ジャンル・口パク/瞬き連動(face_sync)をあとから編集して meta.json へ保存する。"""
+    import json as _json
+    import re
+
+    safe_id = re.sub(r"[^a-z0-9_-]", "", (outfit_id or "").strip().lower())
+    if not safe_id or safe_id == "default":
+        return {"ok": False, "error": "標準制服 (default) のメタデータは変更できません。"}
+    target_dir = os.path.join(FRONTEND_DIR, "assets", "outfits", safe_id)
+    if not os.path.isdir(target_dir):
+        return {"ok": False, "error": "指定の衣装が見つかりません。"}
+
+    meta_path = os.path.join(target_dir, "meta.json")
+    cur: dict[str, Any] = {}
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                cur = _json.load(f)
+        except Exception:
+            cur = {}
+
+    if "name" in payload and str(payload["name"]).strip():
+        nm = str(payload["name"]).strip()[:60]
+        cur["name"] = nm
+        cur["short"] = nm
+    if "genre" in payload:
+        g = str(payload["genre"]).strip().lower()
+        if g in {"school", "casual", "sport", "swimwear", "cosplay", "custom"}:
+            cur["genre"] = g
+    if "face_sync" in payload:
+        cur["face_sync"] = bool(payload["face_sync"])
+    cur["id"] = safe_id
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        _json.dump(cur, f, ensure_ascii=False, indent=2)
+
+    state = await orchestrator.broadcast_appearance_state()
+    return {"ok": True, "outfit_id": safe_id, "meta": cur, **state}
 
 
 @app.delete("/api/outfits/{outfit_id}")

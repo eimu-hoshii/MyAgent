@@ -20,6 +20,7 @@ import cv2
 from PIL import Image
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHAR_DIR = os.path.join(BASE_DIR, "frontend", "assets", "character")
 OUTFITS_DIR = os.path.join(BASE_DIR, "frontend", "assets", "outfits")
 
 # 標準衣装の原画パス（生成元アーティファクト）
@@ -265,6 +266,84 @@ def _cutout_pil_image(pil_img: Image.Image, session=None) -> tuple[np.ndarray, s
     return rgba, "isnet_anime", session
 
 
+def _align_to_canonical_face(rgba: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    基準立ち絵（full_normal.png: 1696x2528）の顔領域（目〜口）へマルチスケールテンプレートマッチングを行い、
+    新衣装の顔位置・スケールを基準制服と完全一致させた (aligned_full_1696x2528, aligned_bust_825x840) を返す。
+    これにより別衣装でも基準制服の瞬き・6感情・あいうえお口パクを1pxズレなく流用できる。
+    """
+    ref_full_path = os.path.join(CHAR_DIR, "full_normal.png")
+    if not os.path.isfile(ref_full_path):
+        return None
+    ref_rgba = np.array(Image.open(ref_full_path).convert("RGBA"))
+    ref_h, ref_w = ref_rgba.shape[:2]  # 2528, 1696
+
+    # 基準立ち絵の顔テンプレート（眉〜口: x=715..985, y=315..495）
+    tx1, ty1, tx2, ty2 = 715, 315, 985, 495
+    tpl = cv2.cvtColor(ref_rgba[ty1:ty2, tx1:tx2, :3], cv2.COLOR_RGB2GRAY)
+
+    # 入力画像を基準高さ (2528) に概算リサイズして探索空間を作る
+    src_h, src_w = rgba.shape[:2]
+    base_scale = float(ref_h) / float(max(1, src_h))
+    search_h = ref_h
+    search_w = max(1, int(round(src_w * base_scale)))
+    resized_src = cv2.resize(rgba, (search_w, search_h), interpolation=cv2.INTER_LANCZOS4)
+    # 顔は必ず画像の上位40%にある
+    search_roi = cv2.cvtColor(resized_src[: int(search_h * 0.42), :, :3], cv2.COLOR_RGB2GRAY)
+
+    best_score = -1.0
+    best_s = 1.0
+    best_loc = (0, 0)
+    # 0.80x 〜 1.25x の範囲で顔スケールを探索
+    for s in np.linspace(0.80, 1.25, 19):
+        tw = max(16, int(round(tpl.shape[1] * s)))
+        th = max(16, int(round(tpl.shape[0] * s)))
+        if th >= search_roi.shape[0] or tw >= search_roi.shape[1]:
+            continue
+        tpl_s = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(search_roi, tpl_s, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        if max_val > best_score:
+            best_score = float(max_val)
+            best_s = float(s)
+            best_loc = max_loc
+
+    # 基準顔との相関が低すぎる場合は別構図とみなしてフォールバック
+    if best_score < 0.32:
+        return None
+
+    # 入力画像を基準顔スケールと完全一致するよう再スケーリング
+    final_scale = base_scale / best_s
+    fw = max(1, int(round(src_w * final_scale)))
+    fh = max(1, int(round(src_h * final_scale)))
+    scaled_rgba = cv2.resize(rgba, (fw, fh), interpolation=cv2.INTER_LANCZOS4)
+
+    # 検出された顔左上座標を最終スケールへ変換し、基準 (tx1, ty1) へ合わせるオフセットを算出
+    det_x = int(round(best_loc[0] / best_s))
+    det_y = int(round(best_loc[1] / best_s))
+    off_x = tx1 - det_x
+    off_y = ty1 - det_y
+
+    # 1696x2528 の基準キャンバスへ配置
+    canvas_full = np.zeros((ref_h, ref_w, 4), dtype=np.uint8)
+    dx1 = max(0, off_x)
+    dy1 = max(0, off_y)
+    sx1 = max(0, -off_x)
+    sy1 = max(0, -off_y)
+    cw = min(ref_w - dx1, fw - sx1)
+    ch = min(ref_h - dy1, fh - sy1)
+    if cw <= 0 or ch <= 0:
+        return None
+    canvas_full[dy1 : dy1 + ch, dx1 : dx1 + cw] = scaled_rgba[sy1 : sy1 + ch, sx1 : sx1 + cw]
+
+    # 基準制服 (normal_open_normal.png: 825x840) と完全に同一座標 (x=497..1198, y=35..749 -> 825x840) でバストアップ切り出し
+    bx1, by1, bw, bh = 497, 35, 701, 714
+    bust_patch = canvas_full[by1 : by1 + bh, bx1 : bx1 + bw]
+    canvas_bust = cv2.resize(bust_patch, (825, 840), interpolation=cv2.INTER_LANCZOS4)
+    print(f"[FaceSync] 基準顔へ自動アライメント成功 (score={best_score:.3f}, scale={final_scale:.3f}, offset=({off_x},{off_y}))")
+    return canvas_full, canvas_bust
+
+
 def build_outfit_from_pil(
     outfit_id: str,
     full_pil: Image.Image,
@@ -272,6 +351,7 @@ def build_outfit_from_pil(
     bust_pil_in: Image.Image | None = None,
     bust_ratio: float = 0.28,
     flip_horizontal: bool = False,
+    face_sync: bool = False,
     meta: dict | None = None,
     session=None,
 ) -> dict:
@@ -282,47 +362,57 @@ def build_outfit_from_pil(
             bust_pil_in = bust_pil_in.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
 
     rgba, bg_mode, session = _cutout_pil_image(full_pil, session=session)
-    rgba = _crop_to_content(rgba, pad=12)
-
-    # 縦解像度を標準化（最大1600px: 2K〜4K原画の鮮明さを維持しつつ軽量化）
-    h, w = rgba.shape[:2]
-    if h > 1600:
-        scale = 1600.0 / float(h)
-        nw = max(1, int(round(w * scale)))
-        nh = 1600
-        rgba = np.array(Image.fromarray(rgba, mode="RGBA").resize((nw, nh), Image.Resampling.LANCZOS))
-        h, w = rgba.shape[:2]
 
     out_dir = os.path.join(OUTFITS_DIR, outfit_id)
     os.makedirs(out_dir, exist_ok=True)
     full_path = os.path.join(out_dir, "full.png")
     bust_path = os.path.join(out_dir, "bust.png")
 
-    Image.fromarray(rgba, mode="RGBA").save(full_path, format="PNG")
+    face_sync_applied = False
+    if face_sync and bust_pil_in is None:
+        aligned = _align_to_canonical_face(rgba)
+        if aligned is not None:
+            aligned_full, aligned_bust = aligned
+            Image.fromarray(aligned_full, mode="RGBA").save(full_path, format="PNG")
+            bust_pil = Image.fromarray(aligned_bust, mode="RGBA")
+            bust_pil.save(bust_path, format="PNG")
+            h, w = aligned_full.shape[:2]
+            face_sync_applied = True
 
-    if bust_pil_in is not None:
-        b_rgba, _, session = _cutout_pil_image(bust_pil_in, session=session)
-        b_rgba = _crop_to_content(b_rgba, pad=8)
-        bh, bw = b_rgba.shape[:2]
-        scale_b = 840.0 / float(max(1, bh))
-        bust_pil = Image.fromarray(b_rgba, mode="RGBA").resize(
-            (max(1, int(round(bw * scale_b))), 840), Image.Resampling.LANCZOS
-        )
-    else:
-        bust_h = max(1, int(round(h * max(0.22, min(0.65, bust_ratio)))))
-        bust_crop = rgba[:bust_h, :]
-        target_w = max(bust_crop.shape[1], int(round(bust_h * 0.98)))
-        bust_canvas = np.zeros((bust_h, target_w, 4), dtype=np.uint8)
-        x_off = (target_w - bust_crop.shape[1]) // 2
-        bust_canvas[:, x_off : x_off + bust_crop.shape[1]] = bust_crop
-        if bust_h != 840:
-            scale_b = 840.0 / float(bust_h)
-            bust_pil = Image.fromarray(bust_canvas, mode="RGBA").resize(
-                (max(1, int(round(target_w * scale_b))), 840), Image.Resampling.LANCZOS
+    if not face_sync_applied:
+        rgba = _crop_to_content(rgba, pad=12)
+        h, w = rgba.shape[:2]
+        if h > 1600:
+            scale = 1600.0 / float(h)
+            nw = max(1, int(round(w * scale)))
+            nh = 1600
+            rgba = np.array(Image.fromarray(rgba, mode="RGBA").resize((nw, nh), Image.Resampling.LANCZOS))
+            h, w = rgba.shape[:2]
+        Image.fromarray(rgba, mode="RGBA").save(full_path, format="PNG")
+
+        if bust_pil_in is not None:
+            b_rgba, _, session = _cutout_pil_image(bust_pil_in, session=session)
+            b_rgba = _crop_to_content(b_rgba, pad=8)
+            bh, bw = b_rgba.shape[:2]
+            scale_b = 840.0 / float(max(1, bh))
+            bust_pil = Image.fromarray(b_rgba, mode="RGBA").resize(
+                (max(1, int(round(bw * scale_b))), 840), Image.Resampling.LANCZOS
             )
         else:
-            bust_pil = Image.fromarray(bust_canvas, mode="RGBA")
-    bust_pil.save(bust_path, format="PNG")
+            bust_h = max(1, int(round(h * max(0.22, min(0.65, bust_ratio)))))
+            bust_crop = rgba[:bust_h, :]
+            target_w = max(bust_crop.shape[1], int(round(bust_h * 0.98)))
+            bust_canvas = np.zeros((bust_h, target_w, 4), dtype=np.uint8)
+            x_off = (target_w - bust_crop.shape[1]) // 2
+            bust_canvas[:, x_off : x_off + bust_crop.shape[1]] = bust_crop
+            if bust_h != 840:
+                scale_b = 840.0 / float(bust_h)
+                bust_pil = Image.fromarray(bust_canvas, mode="RGBA").resize(
+                    (max(1, int(round(target_w * scale_b))), 840), Image.Resampling.LANCZOS
+                )
+            else:
+                bust_pil = Image.fromarray(bust_canvas, mode="RGBA")
+        bust_pil.save(bust_path, format="PNG")
 
     if meta:
         meta_path = os.path.join(out_dir, "meta.json")
@@ -333,14 +423,16 @@ def build_outfit_from_pil(
             "genre": str(meta.get("genre") or "custom"),
             "description": str(meta.get("description") or f"カスタム衣装 ({outfit_id})"),
             "bg_mode": bg_mode,
+            "face_sync": face_sync_applied,
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(save_meta, f, ensure_ascii=False, indent=2)
 
-    print(f"[OK] {outfit_id} ({bg_mode}): full={w}x{h} -> {full_path}, bust={bust_pil.width}x{bust_pil.height} -> {bust_path}")
+    print(f"[OK] {outfit_id} ({bg_mode}, face_sync={face_sync_applied}): full={w}x{h} -> {full_path}, bust={bust_pil.width}x{bust_pil.height} -> {bust_path}")
     return {
         "outfit_id": outfit_id,
         "bg_mode": bg_mode,
+        "face_sync": face_sync_applied,
         "full_path": full_path,
         "bust_path": bust_path,
         "full_size": [w, h],

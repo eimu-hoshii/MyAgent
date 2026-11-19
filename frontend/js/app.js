@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=13";
+import { AvatarRenderer } from "./avatar.js?v=14";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -3018,19 +3018,36 @@ class AgentController {
         const nameInput = document.getElementById("input-outfit-name");
         const idInput = document.getElementById("input-outfit-id");
         const flipInput = document.getElementById("input-outfit-flip");
+        const faceSyncInput = document.getElementById("input-outfit-face-sync");
         const statusEl = document.getElementById("outfit-upload-status");
+        const tabAddEl = document.getElementById("outfit-tab-add");
+        const tabManageEl = document.getElementById("outfit-tab-manage");
         if (!modal || !openBtn) return;
 
         this._pendingOutfitFullB64 = "";
         this._pendingOutfitBustB64 = "";
 
+        const switchTab = (tabName) => {
+            modal.querySelectorAll(".outfit-tab-btn").forEach((b) => {
+                b.classList.toggle("active", b.dataset.outfitTab === tabName);
+            });
+            if (tabAddEl) tabAddEl.classList.toggle("hidden", tabName !== "add");
+            if (tabManageEl) tabManageEl.classList.toggle("hidden", tabName !== "manage");
+            if (submitBtn) submitBtn.classList.toggle("hidden", tabName !== "add");
+            if (tabName === "manage") {
+                this._renderOutfitManageGrid();
+            }
+        };
+        modal.querySelectorAll(".outfit-tab-btn").forEach((b) => {
+            b.addEventListener("click", () => switchTab(b.dataset.outfitTab || "add"));
+        });
+
         const buildPrompt = (outfitDesc) => {
-            const desc = (outfitDesc || "").trim() || "Cute Christmas Santa cosplay mini dress with fluffy white fur trim, mini Santa hat, white over-knee socks, and red boots";
+            const desc = (outfitDesc || "").trim() || "赤いベルベットのサンタミニワンピース（白いふわふわファー縁取り・黒ベルト・ミニサンタ帽・白ニーハイ・赤ブーツ）";
             return [
-                "Generate a single high-resolution (2K) full-body front-facing anime character standing sprite of the exact same anime character from the attached reference sheet (sleek glossy black high twin-tails, sharp crimson red eyes, warm tanned skin tone, cool blushing tsundere expression, slender build).",
-                `Outfit: ${desc}.`,
-                "Pose & Composition: Full body from head to toe with small margins, standing straight facing directly forward, arms relaxed slightly away from her sides so hands and fingers do not overlap her body. Clean sharp Japanese anime cel-shaded lineart matching the reference character.",
-                "Background: Completely flat, uniform pure chroma-key green (#00FF00) solid background with ZERO shadows, ZERO floor shadow, ZERO green lighting reflection on the character, no text, no borders, no props.",
+                "添付したキャラクター立ち絵の人物（顔・表情・赤い瞳・褐色肌・黒髪ツインテール・体格・立ちポーズ・画像内の位置とサイズ）は一切変更せずそのまま維持し、服装だけ以下のように変更してください。",
+                `変更後の服装：${desc}`,
+                "背景は完全に均一な純緑クロマキーグリーン（#00FF00）一色にし、足元の影・ドロップシャドウ・キャラへの緑色の照り返し・文字・枠・小物は一切入れないでください。",
             ].join("\n");
         };
 
@@ -3040,7 +3057,7 @@ class AgentController {
         if (descInput) {
             descInput.addEventListener("input", syncPrompt);
             if (!descInput.value) {
-                descInput.value = "Cute Christmas Santa cosplay: crimson red velvet Santa mini dress trimmed with fluffy white faux-fur, mini Santa hat, white over-knee socks, and red fur-trimmed ankle boots";
+                descInput.value = "赤いベルベットのサンタミニワンピース（白いふわふわファー縁取り・黒ベルト・ミニサンタ帽・白ニーハイ・赤ブーツ）";
             }
         }
         syncPrompt();
@@ -3160,6 +3177,7 @@ class AgentController {
                             name: nameInput?.value?.trim() || "",
                             outfit_id: idInput?.value?.trim() || "",
                             flip_horizontal: !!flipInput?.checked,
+                            face_sync: faceSyncInput ? !!faceSyncInput.checked : true,
                         }),
                     });
                     const res = await resp.json();
@@ -3176,12 +3194,13 @@ class AgentController {
                             : res.bg_mode === "pre_transparent"
                             ? "透過PNGそのまま反映"
                             : "AI透過 (isnet-anime)";
+                    const syncLabel = res.face_sync ? " / 🗣️口パク・瞬き連動ON" : "";
                     this._renderAppearanceState(res, true);
                     if (res.outfit_id) {
-                        this.avatar.setOutfit(res.outfit_id, true, true);
+                        this.avatar.setOutfit(res.outfit_id, true, true, !!res.face_sync);
                     }
                     if (statusEl) {
-                        statusEl.textContent = `✅ 登録完了！（${modeLabel} / 全身 ${(res.full_size || []).join("x")}）`;
+                        statusEl.textContent = `✅ 登録完了！（${modeLabel}${syncLabel}）`;
                         statusEl.classList.remove("error");
                     }
                     resetFull();
@@ -3197,6 +3216,132 @@ class AgentController {
                     submitBtn.textContent = origLabel;
                 }
             });
+        }
+    }
+
+    _renderOutfitManageGrid() {
+        const grid = document.getElementById("outfit-manage-grid");
+        const statusEl = document.getElementById("outfit-manage-status");
+        if (!grid) return;
+        const avail = (this.availableOutfits || []).filter((o) => o.available !== false);
+        const genres = Array.isArray(this.outfitGenres) && this.outfitGenres.length > 0
+            ? this.outfitGenres
+            : [
+                { id: "school", name: "🏫 制服・標準" },
+                { id: "casual", name: "🧶 カジュアル・部屋着" },
+                { id: "sport", name: "🏃 体操服・スポーツ" },
+                { id: "swimwear", name: "🏖️ 水着・リゾート" },
+                { id: "cosplay", name: "✨ コスプレ・和装" },
+                { id: "custom", name: "📁 カスタム追加" },
+            ];
+        const curOutfit = this.currentConfig.active_outfit || "default";
+        grid.innerHTML = "";
+
+        for (const o of avail) {
+            const card = document.createElement("div");
+            card.className = `outfit-manage-card ${o.id === curOutfit ? "active" : ""}`;
+
+            const thumb = document.createElement("div");
+            thumb.className = "outfit-manage-thumb";
+            const img = document.createElement("img");
+            img.src =
+                o.id === "default"
+                    ? "/assets/character/normal_open_normal.png"
+                    : `/assets/outfits/${encodeURIComponent(o.id)}/bust.png?t=${Date.now()}`;
+            img.alt = o.name || o.id;
+            thumb.appendChild(img);
+            card.appendChild(thumb);
+
+            const isDefault = o.id === "default";
+            const nameInp = document.createElement("input");
+            nameInp.type = "text";
+            nameInp.value = o.name || o.short || o.id;
+            nameInp.disabled = isDefault;
+            nameInp.title = `ID: ${o.id}`;
+            card.appendChild(nameInp);
+
+            const genreSel = document.createElement("select");
+            genreSel.disabled = isDefault;
+            for (const g of genres) {
+                const opt = document.createElement("option");
+                opt.value = g.id;
+                opt.textContent = g.name;
+                if ((o.genre || "custom") === g.id) opt.selected = true;
+                genreSel.appendChild(opt);
+            }
+            card.appendChild(genreSel);
+
+            const syncLbl = document.createElement("label");
+            syncLbl.className = "checkbox-row compact";
+            const syncChk = document.createElement("input");
+            syncChk.type = "checkbox";
+            syncChk.checked = isDefault ? true : !!o.face_sync;
+            syncChk.disabled = isDefault;
+            const syncTxt = document.createElement("span");
+            syncTxt.textContent = "🗣️ 口パク・瞬き連動";
+            syncLbl.appendChild(syncChk);
+            syncLbl.appendChild(syncTxt);
+            card.appendChild(syncLbl);
+
+            const act = document.createElement("div");
+            act.className = "outfit-manage-actions";
+
+            const wearBtn = document.createElement("button");
+            wearBtn.type = "button";
+            wearBtn.textContent = "👕 着る";
+            wearBtn.addEventListener("click", async () => {
+                await fetch("/api/appearance", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ outfit: o.id }),
+                });
+                this._renderOutfitManageGrid();
+            });
+            act.appendChild(wearBtn);
+
+            if (!isDefault) {
+                const saveBtn = document.createElement("button");
+                saveBtn.type = "button";
+                saveBtn.className = "primary";
+                saveBtn.textContent = "💾 保存";
+                saveBtn.addEventListener("click", async () => {
+                    const resp = await fetch(`/api/outfits/${encodeURIComponent(o.id)}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            name: nameInp.value.trim(),
+                            genre: genreSel.value,
+                            face_sync: syncChk.checked,
+                        }),
+                    });
+                    const res = await resp.json();
+                    if (res.ok) {
+                        this._renderAppearanceState(res, false);
+                        if (statusEl) statusEl.textContent = `✅ 「${nameInp.value.trim()}」の設定を保存しました。`;
+                        this._renderOutfitManageGrid();
+                    }
+                });
+                act.appendChild(saveBtn);
+
+                const delBtn = document.createElement("button");
+                delBtn.type = "button";
+                delBtn.className = "danger";
+                delBtn.textContent = "🗑️";
+                delBtn.title = "この衣装を削除";
+                delBtn.addEventListener("click", async () => {
+                    if (!confirm(`衣装「${o.name || o.id}」を削除しますか？`)) return;
+                    const resp = await fetch(`/api/outfits/${encodeURIComponent(o.id)}`, { method: "DELETE" });
+                    const res = await resp.json();
+                    if (res.ok) {
+                        this._renderAppearanceState(res, false);
+                        if (statusEl) statusEl.textContent = `🗑️ 「${o.name || o.id}」を削除しました。`;
+                        this._renderOutfitManageGrid();
+                    }
+                });
+                act.appendChild(delBtn);
+            }
+            card.appendChild(act);
+            grid.appendChild(card);
         }
     }
 
@@ -3231,7 +3376,13 @@ class AgentController {
         }
         if (state.active_outfit !== undefined) {
             this.currentConfig.active_outfit = state.active_outfit;
-            this.avatar.setOutfit(state.active_outfit, withSparkle);
+            const activeMeta = (this.availableOutfits || []).find((o) => o.id === state.active_outfit);
+            this.avatar.setOutfit(
+                state.active_outfit,
+                withSparkle,
+                false,
+                activeMeta ? !!activeMeta.face_sync : null
+            );
         }
         if (state.affection) {
             const aff = state.affection;
