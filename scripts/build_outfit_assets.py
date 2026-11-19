@@ -81,10 +81,13 @@ def _defringe_rgba(rgba: np.ndarray, bg_rgb: tuple[float, float, float] = (255.0
         x2 = min(w, int(stats[lbl, cv2.CC_STAT_LEFT] + stats[lbl, cv2.CC_STAT_WIDTH]) + 3)
         y2 = min(h, int(stats[lbl, cv2.CC_STAT_TOP] + stats[lbl, cv2.CC_STAT_HEIGHT]) + 3)
 
-        # 目の白目領域（本当に目の範囲だけ）は絶対に抜かないよう保護
         cy = float(stats[lbl, cv2.CC_STAT_TOP] + stats[lbl, cv2.CC_STAT_HEIGHT] * 0.5) / max(1, h)
         cx = float(stats[lbl, cv2.CC_STAT_LEFT] + stats[lbl, cv2.CC_STAT_WIDTH] * 0.5) / max(1, w)
+        # 目の白目領域は保護
         if 0.08 <= cy <= 0.175 and 0.41 <= cx <= 0.59:
+            continue
+        # 襟・胸・胴体中央（セーラー服の白ライン・ボタン・白リボン等）は絶対に抜かないよう保護
+        if 0.19 <= cy <= 0.48 and 0.25 <= cx <= 0.75:
             continue
 
         sub_comp = (labels[y:y2, x:x2] == lbl)
@@ -93,33 +96,30 @@ def _defringe_rgba(rgba: np.ndarray, bg_rgb: tuple[float, float, float] = (255.0
         if ring_cnt == 0:
             continue
 
-        # ツインテール毛束・もみあげ横の間（y=0.07〜0.34 かつ 顔より左右外側 cx<0.42 or cx>0.58）は
-        # 下端が白い袖に少し触れていても、黒髪・背景・肌に半分以上囲まれていれば100%背景隙間として抜く
-        is_twintail_zone = (0.07 <= cy <= 0.34) and (cx < 0.42 or cx > 0.58)
-        is_dark_or_bg = (alpha <= 0.15) | (lum < 145.0) | ((rgb[:, :, 0] - rgb[:, :, 2]) > 20.0)
+        # ツインテール毛束の間（顔より左右外側）または指の間のみ抜く
+        is_twintail_zone = (0.07 <= cy <= 0.34) and (cx < 0.36 or cx > 0.64)
+        is_dark_or_bg = (alpha <= 0.15) | (lum < 140.0) | ((rgb[:, :, 0] - rgb[:, :, 2]) > 20.0)
         dark_bg_ratio = float(np.sum(ring & is_dark_or_bg[y:y2, x:x2])) / float(ring_cnt)
         white_cloth_ratio = float(np.sum(ring & is_white_cloth[y:y2, x:x2])) / float(ring_cnt)
 
-        if (is_twintail_zone and dark_bg_ratio >= 0.42) or (white_cloth_ratio < 0.15):
+        if (is_twintail_zone and dark_bg_ratio >= 0.50) or (white_cloth_ratio < 0.12 and area <= 700):
             hole_mask[y:y2, x:x2] |= sub_comp
 
-    # 抜いた隙間を完全透過にし、さらに隙間の1px外周の白ハローも薄める
+    # 抜いた隙間を透過にし、境界は滑らかアンチエイリアスでジャギを防止
     alpha[hole_mask] = 0.0
-    hole_halo = (cv2.dilate(hole_mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1) > 0) & (~hole_mask)
-    alpha = np.where(hole_halo & (bg_dist < 85.0) & (sat < 35.0), alpha * 0.35, alpha)
 
-    # 2. 境界エッジ（外周2px以内）の白っぽい半透明ハローを削減（白服の外周を削りすぎないよう厳密化）
+    # 2. 境界エッジの白っぽい半透明ハローを削減
     fg_bin = (alpha > 0.1).astype(np.uint8)
     eroded_2 = cv2.erode(fg_bin, np.ones((3, 3), np.uint8), iterations=2)
     border_band = (fg_bin > 0) & (eroded_2 == 0)
-    white_fringe = border_band & (bg_dist < 42.0) & (sat < 18.0) & (alpha < 0.92)
+    white_fringe = border_band & (bg_dist < 42.0) & (sat < 18.0) & (alpha < 0.90)
     alpha = np.where(white_fringe, alpha * np.clip((bg_dist - 16.0) / 26.0, 0.0, 1.0), alpha)
 
-    # 境界1pxをわずかに引き締めて毛先・指先の白フチを根絶
-    eroded_a = cv2.erode(alpha, np.ones((3, 3), np.uint8), iterations=1)
+    # ジャギ防止のためエッジ帯のみ滑らかにガウシアン平滑化
+    alpha_blur = cv2.GaussianBlur(alpha, (3, 3), 0.65)
     edge_zone = (alpha > 0.0) & (alpha < 0.98)
-    alpha = np.where(edge_zone, alpha * 0.35 + eroded_a * 0.65, alpha)
-    alpha = np.where(alpha < 0.1, 0.0, alpha)
+    alpha = np.where(edge_zone | (hole_mask & (alpha_blur < 0.4)), alpha_blur, alpha)
+    alpha = np.where(alpha < 0.05, 0.0, alpha)
 
     # 3. Color Decontamination（半透明エッジから白背景成分を減算）
     a3 = alpha[:, :, None]
@@ -163,7 +163,13 @@ def _estimate_bg_rgb(img_rgb: np.ndarray) -> tuple[float, float, float]:
     return float(med[0]), float(med[1]), float(med[2])
 
 
-def build_outfit(outfit_id: str, src_path: str, session=None, bust_ratio: float = 0.28) -> tuple[str, str]:
+def build_outfit(
+    outfit_id: str,
+    src_path: str,
+    session=None,
+    bust_ratio: float = 0.28,
+    bust_src_path: str | None = None,
+) -> tuple[str, str]:
     """元画像から完全透過 full.png と、基準制服と顔サイズ一致の bust.png を生成して保存する。"""
     if not os.path.exists(src_path):
         raise FileNotFoundError(f"元画像が見つかりません: {src_path}")
@@ -199,21 +205,34 @@ def build_outfit(outfit_id: str, src_path: str, session=None, bust_ratio: float 
 
     Image.fromarray(rgba, mode="RGBA").save(full_path, format="PNG")
 
-    # 基準制服 (825x840) と同じ「頭頂〜胸の下」バストアップ構図・顔サイズに統一
-    bust_h = max(1, int(round(h * max(0.28, min(0.65, bust_ratio)))))
-    bust_crop = rgba[:bust_h, :]
-    # 基準制服と同じ正方形寄りアスペクト (width ≈ height * 0.98) へ中央配置し、高解像度化
-    target_w = max(bust_crop.shape[1], int(round(bust_h * 0.98)))
-    bust_canvas = np.zeros((bust_h, target_w, 4), dtype=np.uint8)
-    x_off = (target_w - bust_crop.shape[1]) // 2
-    bust_canvas[:, x_off : x_off + bust_crop.shape[1]] = bust_crop
-    if bust_h < 840:
-        scale_b = 840.0 / float(bust_h)
-        bust_pil = Image.fromarray(bust_canvas, mode="RGBA").resize(
-            (max(1, int(round(target_w * scale_b))), 840), Image.Resampling.LANCZOS
+    # バストアップ専用の高解像度画像（--bust-src）が指定された場合はそれを直接透過利用（ネイティブ高精細）
+    if bust_src_path and os.path.exists(bust_src_path):
+        pil_b = Image.open(bust_src_path).convert("RGB")
+        if outfit_id in FLIP_HORIZONTAL_IDS:
+            pil_b = pil_b.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        bg_b = _estimate_bg_rgb(np.array(pil_b))
+        b_cut = remove(pil_b, session=session, post_process_mask=True)
+        b_rgba = _crop_to_content(_defringe_rgba(np.array(b_cut.convert("RGBA")), bg_rgb=bg_b), pad=8)
+        bh, bw = b_rgba.shape[:2]
+        scale_b = 840.0 / float(max(1, bh))
+        bust_pil = Image.fromarray(b_rgba, mode="RGBA").resize(
+            (max(1, int(round(bw * scale_b))), 840), Image.Resampling.LANCZOS
         )
     else:
-        bust_pil = Image.fromarray(bust_canvas, mode="RGBA")
+        # 基準制服 (825x840) と同じ「頭頂〜胸の途中」バストアップ構図・顔サイズに統一
+        bust_h = max(1, int(round(h * max(0.24, min(0.65, bust_ratio)))))
+        bust_crop = rgba[:bust_h, :]
+        target_w = max(bust_crop.shape[1], int(round(bust_h * 0.98)))
+        bust_canvas = np.zeros((bust_h, target_w, 4), dtype=np.uint8)
+        x_off = (target_w - bust_crop.shape[1]) // 2
+        bust_canvas[:, x_off : x_off + bust_crop.shape[1]] = bust_crop
+        if bust_h < 840:
+            scale_b = 840.0 / float(bust_h)
+            bust_pil = Image.fromarray(bust_canvas, mode="RGBA").resize(
+                (max(1, int(round(target_w * scale_b))), 840), Image.Resampling.LANCZOS
+            )
+        else:
+            bust_pil = Image.fromarray(bust_canvas, mode="RGBA")
     bust_pil.save(bust_path, format="PNG")
 
     print(f"[OK] {outfit_id}: full={w}x{h} -> {full_path}, bust={bust_pil.width}x{bust_pil.height} -> {bust_path}")
@@ -223,7 +242,8 @@ def build_outfit(outfit_id: str, src_path: str, session=None, bust_ratio: float 
 def main() -> int:
     parser = argparse.ArgumentParser(description="NIA 衣装アセット高精度透過ビルダー (isnet-anime)")
     parser.add_argument("--id", help="登録する衣装ID（例: yukata, swimsuit, office）")
-    parser.add_argument("--src", help="元画像のパス（PNG/JPG）")
+    parser.add_argument("--src", help="全身元画像のパス（PNG/JPG）")
+    parser.add_argument("--bust-src", help="バストアップ専用の高解像度元画像パス（任意・指定時はネイティブ高精細）")
     parser.add_argument("--bust-ratio", type=float, default=0.28, help="バストアップ切出し比率（既定 0.28 = 基準制服と顔サイズ完全一致）")
     parser.add_argument("--rebuild-defaults", action="store_true", help="pajama / casual / maid を一括再生成")
     args = parser.parse_args()
@@ -239,7 +259,13 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    build_outfit(args.id.strip(), args.src.strip(), session=session, bust_ratio=args.bust_ratio)
+    build_outfit(
+        args.id.strip(),
+        args.src.strip(),
+        session=session,
+        bust_ratio=args.bust_ratio,
+        bust_src_path=args.bust_src.strip() if args.bust_src else None,
+    )
     return 0
 
 
