@@ -1287,9 +1287,19 @@ class AgentController {
             return types ? Array.from(types).includes("Files") : false;
         };
 
+        const isAnyModalOpen = () => {
+            const m1 = document.getElementById("outfit-upload-modal");
+            const m2 = document.getElementById("persona-modal");
+            return (m1 && !m1.classList.contains("hidden")) || (m2 && !m2.classList.contains("hidden"));
+        };
+
         window.addEventListener("dragover", (e) => {
             if (!hasDraggedFiles(e)) return;
             e.preventDefault();
+            if (isAnyModalOpen()) {
+                hideOverlay();
+                return;
+            }
             overlay.classList.remove("hidden");
             scheduleHide();
         });
@@ -1315,6 +1325,7 @@ class AgentController {
         window.addEventListener("drop", (e) => {
             e.preventDefault();
             hideOverlay();
+            if (isAnyModalOpen()) return;
             const files = e.dataTransfer && e.dataTransfer.files;
             if (files && files.length > 0) {
                 this._handleDroppedFile(files[0]);
@@ -3104,11 +3115,13 @@ class AgentController {
             if (zoneEl) {
                 zoneEl.addEventListener("dragover", (e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     zoneEl.classList.add("dragover");
                 });
                 zoneEl.addEventListener("dragleave", () => zoneEl.classList.remove("dragover"));
                 zoneEl.addEventListener("drop", (e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     zoneEl.classList.remove("dragover");
                     loadFile(e.dataTransfer?.files?.[0]);
                 });
