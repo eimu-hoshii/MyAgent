@@ -2425,4 +2425,36 @@ body.mascot-mode .subtitle-box p.subtitle-sub {
     border-color: #fb7185;
 }
 
+.outfit-picker-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.outfit-select {
+    background: rgba(15, 23, 42, 0.9);
+    color: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, 0.38);
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    max-width: 170px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.outfit-select:hover,
+.outfit-select:focus {
+    border-color: #f472b6;
+    box-shadow: 0 0 8px rgba(244, 114, 182, 0.28);
+}
+
+.outfit-select option {
+    background: #0f172a;
+    color: #f8fafc;
+}
+
+
 

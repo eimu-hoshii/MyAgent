@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=10";
+import { AvatarRenderer } from "./avatar.js?v=11";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -584,6 +584,31 @@ class AgentController {
                 try {
                     await fetch("/api/affection/reset", { method: "POST" });
                 } catch (_) {}
+            });
+        }
+        const genreSel = document.getElementById("select-outfit-genre");
+        const outfitSel = document.getElementById("select-outfit-item");
+        if (genreSel && outfitSel) {
+            genreSel.addEventListener("change", () => {
+                this.selectedOutfitGenre = genreSel.value;
+                this._populateOutfitSelect(this.selectedOutfitGenre, this.currentConfig.active_outfit || "default");
+                // ジャンル切替時、先頭の衣装へ即座に着替えて快適に試せるようにする
+                if (outfitSel.value && outfitSel.value !== (this.currentConfig.active_outfit || "default")) {
+                    fetch("/api/appearance", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ outfit: outfitSel.value }),
+                    }).catch(() => {});
+                }
+            });
+            outfitSel.addEventListener("change", () => {
+                const oid = outfitSel.value;
+                if (!oid) return;
+                fetch("/api/appearance", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ outfit: oid }),
+                }).catch(() => {});
             });
         }
 
@@ -1857,11 +1882,9 @@ class AgentController {
                 this._renderAppearanceState(
                     {
                         active_outfit: data.config?.active_outfit,
-                        active_accessories: data.config?.active_accessories,
+                        outfit_genres: data.outfit_genres,
                         outfits: data.outfits,
-                        accessories: data.accessories,
                         affection: data.affection,
-                        environment: data.environment,
                     },
                     false
                 );
@@ -2975,30 +2998,38 @@ class AgentController {
         }
     }
 
+    _populateOutfitSelect(genreId, activeOutfitId) {
+        const outfitSel = document.getElementById("select-outfit-item");
+        if (!outfitSel) return;
+        const list = (this.availableOutfits || []).filter(
+            (o) => o.available !== false && (o.genre || "custom") === genreId
+        );
+        outfitSel.innerHTML = "";
+        for (const o of list) {
+            const opt = document.createElement("option");
+            opt.value = o.id;
+            opt.textContent = o.name || o.short || o.id;
+            opt.title = o.description || o.name || "";
+            outfitSel.appendChild(opt);
+        }
+        if (list.some((o) => o.id === activeOutfitId)) {
+            outfitSel.value = activeOutfitId;
+        } else if (list.length > 0) {
+            outfitSel.value = list[0].id;
+        }
+    }
+
     _renderAppearanceState(state, withSparkle = false) {
         if (!state) return;
+        if (Array.isArray(state.outfit_genres) && state.outfit_genres.length > 0) {
+            this.outfitGenres = state.outfit_genres;
+        }
         if (Array.isArray(state.outfits) && state.outfits.length > 0) {
             this.availableOutfits = state.outfits;
-        }
-        if (Array.isArray(state.accessories) && state.accessories.length > 0) {
-            this.availableAccessories = state.accessories;
         }
         if (state.active_outfit !== undefined) {
             this.currentConfig.active_outfit = state.active_outfit;
             this.avatar.setOutfit(state.active_outfit, withSparkle);
-        }
-        if (Array.isArray(state.active_accessories)) {
-            this.currentConfig.active_accessories = state.active_accessories;
-            this.avatar.setAccessories(state.active_accessories);
-        }
-        if (state.environment) {
-            this.avatar.setEnvironment(state.environment, this.currentConfig.weather_bg_effect_enabled !== false);
-            const envPill = document.getElementById("env-weather-pill");
-            if (envPill) {
-                const pMap = { morning: "🌅 朝", day: "☀️ 昼", evening: "🌇 夕方", night: "🌙 夜" };
-                const wMap = { rain: " / 🌧️ 雨", cloudy: " / ☁️ 曇", clear: "" };
-                envPill.textContent = `${pMap[state.environment.time_period] || "☀️ 昼"}${wMap[state.environment.weather_kind] || ""}`;
-            }
         }
         if (state.affection) {
             const aff = state.affection;
@@ -3012,53 +3043,37 @@ class AgentController {
             }
         }
 
-        // 衣装ボタン描画
-        const outfitGroup = document.getElementById("outfit-btn-group");
-        if (outfitGroup && this.availableOutfits.length > 0) {
+        // ジャンルプルダウン → 衣装プルダウン描画
+        const genreSel = document.getElementById("select-outfit-genre");
+        if (genreSel && (this.availableOutfits || []).length > 0) {
+            const avail = this.availableOutfits.filter((o) => o.available !== false);
             const curOutfit = this.currentConfig.active_outfit || "default";
-            outfitGroup.innerHTML = "";
-            for (const o of this.availableOutfits) {
-                if (o.available === false) continue;
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = `outfit-btn ${o.id === curOutfit ? "active" : ""}`;
-                btn.textContent = o.short ? `${(o.name || "").split(" ")[0]} ${o.short}` : o.name;
-                btn.title = o.description || o.name;
-                btn.addEventListener("click", async () => {
-                    try {
-                        await fetch("/api/appearance", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ outfit: o.id }),
-                        });
-                    } catch (_) {}
-                });
-                outfitGroup.appendChild(btn);
-            }
-        }
+            const curMeta = avail.find((o) => o.id === curOutfit) || avail[0];
+            const activeGenre = curMeta ? (curMeta.genre || "school") : "school";
 
-        // アクセサリーボタン描画
-        const accGroup = document.getElementById("accessory-btn-group");
-        if (accGroup && this.availableAccessories.length > 0) {
-            const activeSet = new Set(this.currentConfig.active_accessories || []);
-            accGroup.innerHTML = "";
-            for (const a of this.availableAccessories) {
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = `acc-btn ${activeSet.has(a.id) ? "active" : ""}`;
-                btn.textContent = a.name;
-                btn.title = `${a.name} を着脱する`;
-                btn.addEventListener("click", async () => {
-                    try {
-                        await fetch("/api/appearance", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ toggle_accessory: a.id }),
-                        });
-                    } catch (_) {}
-                });
-                accGroup.appendChild(btn);
+            const genreCatalog = Array.isArray(this.outfitGenres) && this.outfitGenres.length > 0
+                ? this.outfitGenres
+                : [
+                    { id: "school", name: "🏫 制服・標準" },
+                    { id: "casual", name: "🧶 カジュアル・部屋着" },
+                    { id: "sport", name: "🏃 体操服・スポーツ" },
+                    { id: "swimwear", name: "🏖️ 水着・リゾート" },
+                    { id: "cosplay", name: "✨ コスプレ・和装" },
+                    { id: "custom", name: "📁 カスタム追加" },
+                ];
+            const usedGenres = genreCatalog.filter((g) => avail.some((o) => (o.genre || "custom") === g.id));
+
+            genreSel.innerHTML = "";
+            for (const g of usedGenres) {
+                const cnt = avail.filter((o) => (o.genre || "custom") === g.id).length;
+                const opt = document.createElement("option");
+                opt.value = g.id;
+                opt.textContent = `${g.name} (${cnt})`;
+                genreSel.appendChild(opt);
             }
+            this.selectedOutfitGenre = activeGenre;
+            genreSel.value = activeGenre;
+            this._populateOutfitSelect(activeGenre, curOutfit);
         }
     }
 

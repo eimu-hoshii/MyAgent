@@ -196,38 +196,113 @@ SKILL_PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
+# 衣装ジャンル定義（プルダウンの親カテゴリ順）
+OUTFIT_GENRES: list[dict[str, str]] = [
+    {"id": "school", "name": "🏫 制服・標準"},
+    {"id": "casual", "name": "🧶 カジュアル・部屋着"},
+    {"id": "sport", "name": "🏃 体操服・スポーツ"},
+    {"id": "swimwear", "name": "🏖️ 水着・リゾート"},
+    {"id": "cosplay", "name": "✨ コスプレ・和装"},
+    {"id": "custom", "name": "📁 カスタム追加"},
+]
+
 # キャラクター衣装カタログ（frontend/assets/outfits/<id>/ または default）
 OUTFIT_CATALOG: dict[str, dict[str, str]] = {
     "default": {
         "id": "default",
+        "genre": "school",
         "name": "🧥 黒ブレザー制服 (標準)",
-        "short": "制服",
+        "short": "黒ブレザー制服",
         "description": "黒ブレザー＋白パーカー＋ルーズソックスの標準スタイル",
+    },
+    "sailor": {
+        "id": "sailor",
+        "genre": "school",
+        "name": "⛵ 夏服セーラー服",
+        "short": "夏服セーラー服",
+        "description": "黒襟白ライン＆赤リボンの爽やかな夏服セーラー",
     },
     "pajama": {
         "id": "pajama",
+        "genre": "casual",
         "name": "🌙 もこもこ部屋着パジャマ",
-        "short": "パジャマ",
+        "short": "もこもこパジャマ",
         "description": "夜のリラックスタイム向けオフショルもこもこルームウェア",
     },
     "casual": {
         "id": "casual",
+        "genre": "casual",
         "name": "🧶 オフショル私服ニット",
-        "short": "私服",
+        "short": "オフショル私服ニット",
         "description": "アイボリーニット＋赤黒チェックミニスカートの休日私服",
+    },
+    "hoodie_street": {
+        "id": "hoodie_street",
+        "genre": "casual",
+        "name": "🎧 ストリートパーカー",
+        "short": "ストリートパーカー",
+        "description": "オーバーサイズ黒パーカー＋デニムショーツのストリート私服",
+    },
+    "onepiece_summer": {
+        "id": "onepiece_summer",
+        "genre": "casual",
+        "name": "👗 夏のサマーワンピース",
+        "short": "サマーワンピース",
+        "description": "白コットン＆赤リボンの爽やかな夏ワンピース",
+    },
+    "gym_jersey": {
+        "id": "gym_jersey",
+        "genre": "sport",
+        "name": "🧥 体操服（紺ジャージ）",
+        "short": "体操服・ジャージ",
+        "description": "前開き紺ジャージ上下＋体操シャツのスポーティスタイル",
+    },
+    "gym_shorts": {
+        "id": "gym_shorts",
+        "genre": "sport",
+        "name": "🏃 体操服（濃紺ショーツ）",
+        "short": "体操服・ショーツ",
+        "description": "白体操シャツ＋濃紺スポーツショーツの体操服スタイル",
+    },
+    "swim_tankini": {
+        "id": "swim_tankini",
+        "genre": "swimwear",
+        "name": "🏖️ タンキニ＆ボーイレッグ",
+        "short": "タンキニ水着",
+        "description": "黒×赤リボンのキャミソール型タンキニ＆ボーイレッグ水着",
+    },
+    "swim_highneck": {
+        "id": "swim_highneck",
+        "genre": "swimwear",
+        "name": "🌊 ハイネック・ホルター水着",
+        "short": "ハイネック水着",
+        "description": "黒×赤ラインのスタイリッシュなハイネック＆ボーイレッグ水着",
     },
     "maid": {
         "id": "maid",
+        "genre": "cosplay",
         "name": "🎀 クラシックメイド服",
-        "short": "メイド服",
+        "short": "クラシックメイド服",
         "description": "黒×白フリル＆赤リボンのツンデレ専用メイド服",
+    },
+    "yukata": {
+        "id": "yukata",
+        "genre": "cosplay",
+        "name": "🏮 黒×紅椿の浴衣",
+        "short": "黒×紅椿の浴衣",
+        "description": "黒地に紅椿と金箔が映える夏祭り浴衣スタイル",
+    },
+    "miko": {
+        "id": "miko",
+        "genre": "cosplay",
+        "name": "⛩️ 紅白の巫女装束",
+        "short": "巫女装束",
+        "description": "白小袖と緋袴が凛々しい和風巫女コスプレ",
     },
 }
 
-# Canvas重ね合わせエフェクトカタログ（立ち絵品質を損なうベクター小物は廃止し照れチークのみ）
-ACCESSORY_CATALOG: dict[str, dict[str, str]] = {
-    "blush": {"id": "blush", "name": "😳 照れチーク"},
-}
+# Canvas重ね合わせアクセサリーは撤去（立ち絵品質優先）
+ACCESSORY_CATALOG: dict[str, dict[str, str]] = {}
 
 
 @dataclass

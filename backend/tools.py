@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 from typing import Any
 import httpx
 from PIL import ImageGrab
-from backend.config import ACCESSORY_CATALOG, BASE_DIR, OUTFIT_CATALOG, VISION_CAPTURE_DIR, config
+from backend.config import ACCESSORY_CATALOG, BASE_DIR, OUTFIT_CATALOG, OUTFIT_GENRES, VISION_CAPTURE_DIR, config
 from backend.memory import memory_manager
 from backend.models import EventSource
 
@@ -43,12 +43,14 @@ def list_available_outfits() -> list[dict[str, Any]]:
     outfits_root = os.path.join(BASE_DIR, "frontend", "assets", "outfits")
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
+    genre_names = {g["id"]: g["name"] for g in OUTFIT_GENRES}
     for oid, meta in OUTFIT_CATALOG.items():
         if oid == "default":
             available = True
         else:
             available = os.path.isfile(os.path.join(outfits_root, oid, "full.png"))
-        items.append({**meta, "available": available})
+        gid = meta.get("genre", "custom")
+        items.append({**meta, "genre": gid, "genre_name": genre_names.get(gid, "📁 カスタム追加"), "available": available})
         seen.add(oid)
     if os.path.isdir(outfits_root):
         for entry in sorted(os.listdir(outfits_root)):
@@ -59,6 +61,8 @@ def list_available_outfits() -> list[dict[str, Any]]:
                 items.append(
                     {
                         "id": entry,
+                        "genre": "custom",
+                        "genre_name": genre_names.get("custom", "📁 カスタム追加"),
                         "name": f"✨ カスタム衣装 ({entry})",
                         "short": entry,
                         "description": f"カスタム追加衣装 ({entry})",

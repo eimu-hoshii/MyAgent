@@ -277,9 +277,9 @@ export class AvatarRenderer {
         this.activeOutfit = nextId;
         if (nextId !== "default" && !this.outfitImages[nextId]) {
             const bust = new Image();
-            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=2`;
+            bust.src = `/assets/outfits/${encodeURIComponent(nextId)}/bust.png?v=3`;
             const full = new Image();
-            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=2`;
+            full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?v=3`;
             this.outfitImages[nextId] = { bust, full };
         }
         if (changed && withSparkle) {
@@ -685,32 +685,11 @@ export class AvatarRenderer {
     }
 
     /**
-     * 照れチーク（blush）と感情連動の漫画記号をキャラ座標へ重ね描画する。
+     * 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間）のみをキャラ座標へ重ね描画する。
      */
     _drawAccessoriesAndMarks(ctx, headX, headY, headR, now) {
-        const acc = new Set(this.activeAccessories || []);
-        const isBlushing =
-            acc.has("blush") ||
-            now < this.blushUntil ||
-            (this.currentEmotion === "smile" && now - this.emotionTriggerTime < 2200);
-
         ctx.save();
-        // 1. 頬のふんわり赤面チーク
-        if (isBlushing) {
-            for (const side of [-1, 1]) {
-                const bx = headX + side * headR * 0.44;
-                const by = headY + headR * 0.26;
-                const bg = ctx.createRadialGradient(bx, by, 1, bx, by, headR * 0.26);
-                bg.addColorStop(0, "rgba(244, 63, 94, 0.42)");
-                bg.addColorStop(1, "rgba(244, 63, 94, 0)");
-                ctx.fillStyle = bg;
-                ctx.beginPath();
-                ctx.ellipse(bx, by, headR * 0.26, headR * 0.14, 0, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        // 2. 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間表示）
+        // 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間表示）
         const emoAge = now - this.emotionTriggerTime;
         if (emoAge < 2200) {
             const fade = Math.min(1, (2200 - emoAge) / 500);
@@ -755,8 +734,6 @@ export class AvatarRenderer {
         const w = this.canvas.width;
         const h = this.canvas.height;
         ctx.clearRect(0, 0, w, h);
-
-        this._drawEnvironmentBackdrop(ctx, w, h, now);
 
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";

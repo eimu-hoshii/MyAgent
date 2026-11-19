@@ -493,7 +493,7 @@ async def apply_skill_preset_api(payload: dict[str, Any] = Body(...)) -> dict[st
 @app.get("/api/outfits")
 async def list_outfits_api() -> dict[str, Any]:
     """利用可能な衣装・アクセサリー・親密度・時間帯/天気環境状態を返す。"""
-    from backend.config import ACCESSORY_CATALOG
+    from backend.config import ACCESSORY_CATALOG, OUTFIT_GENRES
     from backend.tools import list_available_outfits
 
     return {
@@ -502,6 +502,7 @@ async def list_outfits_api() -> dict[str, Any]:
         "active_accessories": list(config.active_accessories or []),
         "outfits": list_available_outfits(),
         "accessories": list(ACCESSORY_CATALOG.values()),
+        "outfit_genres": OUTFIT_GENRES,
         "affection": memory_manager.get_affection_state(),
         "environment": orchestrator.get_environment_state(),
     }
@@ -510,7 +511,7 @@ async def list_outfits_api() -> dict[str, Any]:
 @app.post("/api/appearance")
 async def update_appearance_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """衣装やアクセサリー装着状態、時間帯自動着替え・天気背景演出を更新して全クライアントへ配信する。"""
-    from backend.config import ACCESSORY_CATALOG
+    from backend.config import ACCESSORY_CATALOG, OUTFIT_GENRES
     from backend.tools import list_available_outfits
 
     avail_ids = {o["id"] for o in list_available_outfits() if o.get("available")}

@@ -848,22 +848,28 @@ class LLMEngine:
             args["outfit"] = "pajama"
         elif any(w in low for w in ("メイド", "maid")):
             args["outfit"] = "maid"
+        elif any(w in low for w in ("セーラー", "夏服", "sailor")):
+            args["outfit"] = "sailor"
+        elif any(w in low for w in ("ストリート", "パーカー", "hoodie")):
+            args["outfit"] = "hoodie_street"
+        elif any(w in low for w in ("ワンピース", "ワンピ", "サマードレス", "onepiece")):
+            args["outfit"] = "onepiece_summer"
+        elif any(w in low for w in ("ジャージ", "jersey")):
+            args["outfit"] = "gym_jersey"
+        elif any(w in low for w in ("体操服", "体操着", "ブルマ", "ショーツ", "gym")):
+            args["outfit"] = "gym_shorts"
+        elif any(w in low for w in ("ハイネック", "ホルター", "highneck")):
+            args["outfit"] = "swim_highneck"
+        elif any(w in low for w in ("水着", "タンキニ", "ビキニ", "swim", "tankini")):
+            args["outfit"] = "swim_tankini"
+        elif any(w in low for w in ("浴衣", "ゆかた", "yukata")):
+            args["outfit"] = "yukata"
+        elif any(w in low for w in ("巫女", "みこ", "miko")):
+            args["outfit"] = "miko"
         elif any(w in low for w in ("私服", "ニット", "デート服", "casual")):
             args["outfit"] = "casual"
         elif any(w in low for w in ("制服", "ブレザー", "標準", "元に戻", "元の服", "default")):
             args["outfit"] = "default"
-
-        is_remove = any(w in raw for w in ("外して", "とって", "取って", "なし", "オフ"))
-        if any(w in raw for w in ("全部外", "すべて外", "アクセサリー外", "小物外")):
-            args["clear_accessories"] = True
-        else:
-            acc_map = [
-                ("blush", ("赤面", "チーク", "照れ")),
-            ]
-            for acc_id, kws in acc_map:
-                if any(k in raw for k in kws):
-                    args["remove_accessory" if is_remove else "add_accessory"] = acc_id
-                    break
 
         return args or None
 

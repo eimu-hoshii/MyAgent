@@ -20,7 +20,7 @@ from backend.automation import (
     save_research_report,
     windows_control_manager,
 )
-from backend.config import ACCESSORY_CATALOG, AUDIO_CACHE_DIR, SKILL_PRESETS, config
+from backend.config import ACCESSORY_CATALOG, AUDIO_CACHE_DIR, OUTFIT_GENRES, SKILL_PRESETS, config
 from backend.discord_connector import DiscordBotConnector
 from backend.guardrail import inspect_incoming_event
 from backend.live_stream import LiveStreamConnector
@@ -148,7 +148,8 @@ class AgentOrchestrator:
         payload = {
             "type": "appearance_updated",
             "active_outfit": config.active_outfit,
-            "active_accessories": list(config.active_accessories or []),
+            "active_accessories": [],
+            "outfit_genres": OUTFIT_GENRES,
             "outfits": list_available_outfits(),
             "accessories": list(ACCESSORY_CATALOG.values()),
             "affection": memory_manager.get_affection_state(),
@@ -463,6 +464,7 @@ class AgentOrchestrator:
                     {"id": pid, "name": p["name"], "description": p["description"], "mode": p["mode"]}
                     for pid, p in SKILL_PRESETS.items()
                 ],
+                "outfit_genres": OUTFIT_GENRES,
                 "outfits": list_available_outfits(),
                 "accessories": list(ACCESSORY_CATALOG.values()),
                 "affection": memory_manager.get_affection_state(),
