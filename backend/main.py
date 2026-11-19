@@ -542,6 +542,12 @@ async def update_appearance_api(payload: dict[str, Any] = Body(...)) -> dict[str
     return {"ok": True, **state}
 
 
+@app.post("/api/outfits/random")
+async def random_outfit_api() -> dict[str, Any]:
+    """利用可能な衣装からランダムに1着選んで即時着替える（メインページのワンタッチボタン用）。"""
+    return await orchestrator.pick_random_outfit(exclude_current=True)
+
+
 @app.post("/api/outfits/upload")
 async def upload_custom_outfit_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """

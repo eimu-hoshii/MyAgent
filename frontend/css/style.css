@@ -2473,6 +2473,30 @@ body.mascot-mode .subtitle-box p.subtitle-sub {
     color: #fff;
 }
 
+.outfit-random-btn {
+    background: rgba(56, 189, 248, 0.16);
+    color: #bae6fd;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    border-radius: 8px;
+    padding: 3px 9px;
+    font-size: 0.71rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+
+.outfit-random-btn:hover {
+    background: rgba(56, 189, 248, 0.32);
+    color: #fff;
+}
+
+/* VTuberモード時はふれあいUI・本日のデレ度ゲージを非表示にして初期ペルソナ維持 */
+body.mode-vtuber #affection-pill,
+body.mode-vtuber #btn-pointer-mode {
+    display: none !important;
+}
+
 .outfit-modal-dialog {
     max-width: 720px;
     width: 94vw;

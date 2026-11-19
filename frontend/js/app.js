@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=15";
+import { AvatarRenderer } from "./avatar.js?v=16";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -609,6 +609,18 @@ class AgentController {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ outfit: oid }),
                 }).catch(() => {});
+            });
+        }
+        const randomOutfitBtn = document.getElementById("btn-random-outfit");
+        if (randomOutfitBtn) {
+            randomOutfitBtn.addEventListener("click", async () => {
+                try {
+                    const resp = await fetch("/api/outfits/random", { method: "POST" });
+                    const res = await resp.json();
+                    if (res.ok) {
+                        this._renderAppearanceState(res, false);
+                    }
+                } catch (_) {}
             });
         }
         this._setupOutfitUploadModal();
@@ -1502,6 +1514,8 @@ class AgentController {
 
         // タブ2: マスコット・視覚・監視
         setVal("cfg-mascot-scale", c.mascot_scale ?? 1.0);
+        setVal("cfg-outfit-auto-mode", c.outfit_auto_mode || "time_only");
+        setVal("cfg-outfit-interval-min", c.outfit_interval_min ?? 60);
         setVal("cfg-mascot-position", c.mascot_position || "bottom-right");
         setVal("cfg-vision-target", c.vision_target || "active_window");
         setVal("cfg-window-watch-sec", c.window_watch_interval_sec ?? 180);
@@ -1707,6 +1721,8 @@ class AgentController {
             persona_agent: val("textarea-persona-agent"),
             persona_vtuber: val("textarea-persona-vtuber"),
             mascot_scale: parseFloat(val("cfg-mascot-scale")) || 1.0,
+            outfit_auto_mode: val("cfg-outfit-auto-mode") || "time_only",
+            outfit_interval_min: parseInt(val("cfg-outfit-interval-min"), 10) || 60,
             mascot_position: val("cfg-mascot-position"),
             vision_target: val("cfg-vision-target"),
             window_watch_interval_sec: parseInt(val("cfg-window-watch-sec"), 10) || 180,
@@ -2809,6 +2825,14 @@ class AgentController {
         this.currentConfig = cfg;
 
         document.body.classList.toggle("mode-vtuber", normalizedMode === "vtuber");
+        // VTuberモード時はふれあいOFF（位置移動モード固定）、Agentモード時はボタン状態へ復帰
+        const pointerModeBtn = document.getElementById("btn-pointer-mode");
+        if (normalizedMode === "vtuber") {
+            this.avatar.setPointerMode("pan");
+        } else if (pointerModeBtn) {
+            const wantInteract = pointerModeBtn.classList.contains("active");
+            this.avatar.setPointerMode(wantInteract ? "interact" : "pan");
+        }
         document.body.classList.toggle("mode-agent", normalizedMode !== "vtuber");
 
         document.querySelectorAll(".mode-btn").forEach((btn) => {

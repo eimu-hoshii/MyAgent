@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=28" />
+    <link rel="stylesheet" href="/css/style.css?v=29" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -249,6 +249,9 @@
                     <div class="outfit-picker-group">
                         <select id="select-outfit-genre" class="outfit-select" title="衣装ジャンルを選択"></select>
                         <select id="select-outfit-item" class="outfit-select" title="着替える衣装を選択"></select>
+                        <button type="button" id="btn-random-outfit" class="outfit-random-btn" title="利用可能な衣装からランダムに1着選んで即時お着替え">
+                            🎲 ランダム
+                        </button>
                         <button type="button" id="btn-open-outfit-modal" class="outfit-add-btn" title="衣装の新規追加・サムネイル一覧からのジャンル/名前編集・Nano Banana Proテンプレート">
                             👗 衣装管理
                         </button>
@@ -605,6 +608,23 @@
                         <label class="checkbox-label"><input type="checkbox" id="cfg-dnd-fullscreen" checked /> フルスクリーン作業・ゲーム中は自律発話をミュート</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-wake-required" /> 音声入力時にウェイクワード（「ニア」）を必須にする</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-clipboard-watch" /> コピーしたテキストを自動監視してニアが解説する</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>👗 自動お着替えモード（日替わり / 起動時 / 一定時間 / ランダム）</span>
+                            <select id="cfg-outfit-auto-mode">
+                                <option value="time_only">🌙 時間帯のみ（深夜23〜5時パジャマ⇄朝制服）</option>
+                                <option value="daily">📅 日替わりランダム（毎日自動で衣装チェンジ）</option>
+                                <option value="startup">🚀 起動時ランダム（起動するたびランダム着替え）</option>
+                                <option value="interval">⏱️ 一定時間ごとランダム（下の間隔で自動着替え）</option>
+                                <option value="random">🎲 完全ランダム（起動時＋一定時間ごと）</option>
+                                <option value="off">✋ OFF（手動切替のみ）</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            <span>⏱️ 一定時間ランダムの間隔（分: 5〜720）</span>
+                            <input type="number" id="cfg-outfit-interval-min" min="5" max="720" value="60" />
+                        </label>
                     </div>
                     <div class="inline-action-bar">
                         <span>🚀 Windows起動時にマスコットを自動常駐（スタートアップ登録）:</span>
@@ -1094,6 +1114,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=35"></script>
+    <script type="module" src="/js/app.js?v=36"></script>
 </body>
 </html>

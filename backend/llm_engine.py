@@ -434,15 +434,12 @@ class LLMEngine:
         topic_text = f"\n【現在の配信テーマ】{config.stream_topic}\n" if (config.mode == "vtuber" and config.stream_topic) else ""
 
         outfit_info = OUTFIT_CATALOG.get(config.active_outfit, {"name": config.active_outfit})
-        acc_names = [ACCESSORY_CATALOG[a]["name"] for a in (config.active_accessories or []) if a in ACCESSORY_CATALOG]
-        appearance_text = (
-            f"\n【現在の見た目・親密度】\n"
-            f"- 現在の服装: {outfit_info['name']} / アクセサリー: {', '.join(acc_names) if acc_names else 'なし'}\n"
-        )
-        if config.affection_enabled:
+        appearance_text = f"\n【現在の服装】{outfit_info['name']}\n"
+        # VTuberモードでは初期ペルソナを厳格維持するため、親密度（デレ度）注入はAgentモードのみ行う
+        if config.mode == "agent" and config.affection_enabled:
             aff = memory_manager.get_affection_state()
             appearance_text += (
-                f"- マスターとの親密度: Lv.{aff['level']}「{aff['title']}」({aff['points']}pt) — {aff['prompt_hint']}\n"
+                f"【マスターとの本日のデレ度】Lv.{aff['level']}「{aff['title']}」({aff['points']}pt) — {aff['prompt_hint']}\n"
             )
 
         return (
@@ -953,8 +950,8 @@ class LLMEngine:
         prefetched_briefing_tools: set[str] = set()
         executed_appearance_direct = False
 
-        # 着せ替え・アクセサリー指示は空振りゼロで即座に反映し、照れ反応セリフを1パス生成
-        if event.source in (EventSource.USER_TEXT, EventSource.USER_VOICE, EventSource.DISCORD, EventSource.LIVE_COMMENT):
+        # 着せ替え指示はAgentモードかつマスター直接発話時のみ即座に反映（VTuberモード・リスナーコメントでは無効）
+        if config.mode == "agent" and event.source in (EventSource.USER_TEXT, EventSource.USER_VOICE, EventSource.DISCORD):
             direct_app = self._detect_direct_appearance_command(event.content)
             if direct_app:
                 app_obs = await execute_agent_tool("change_appearance", direct_app, event_source=event.source)
@@ -1292,7 +1289,7 @@ class LLMEngine:
             speech_sub=parsed.speech_sub,
         )
 
-        if config.affection_enabled and event.source in (
+        if config.mode == "agent" and config.affection_enabled and event.source in (
             EventSource.USER_TEXT,
             EventSource.USER_VOICE,
             EventSource.DISCORD,

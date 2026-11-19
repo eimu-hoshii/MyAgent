@@ -122,6 +122,7 @@ class AgentOrchestrator:
         self.current_weather_kind: str = "clear"  # "clear" | "cloudy" | "rain"
         self.last_weather_bg_check: float = 0.0
         self.last_time_outfit_period: str = ""
+        self.last_outfit_random_time: float = time.time()
 
         self._worker_task: asyncio.Task[Any] | None = None
         self._proactive_task: asyncio.Task[Any] | None = None
@@ -158,8 +159,25 @@ class AgentOrchestrator:
         await self.broadcast(payload)
         return payload
 
+    async def pick_random_outfit(self, exclude_current: bool = True) -> dict[str, Any]:
+        """利用可能な衣装一覧からランダムに1着選んで即時着替え・全クライアント配信する。"""
+        avail = [o for o in list_available_outfits() if o.get("available")]
+        if not avail:
+            return {"ok": False, "error": "利用可能な衣装がありません。"}
+        cur = config.active_outfit or "default"
+        pool = [o for o in avail if o["id"] != cur] if (exclude_current and len(avail) > 1) else avail
+        chosen = random.choice(pool)
+        config.active_outfit = chosen["id"]
+        self.last_outfit_random_time = time.time()
+        config.save_persona_settings()
+        state = await self.broadcast_appearance_state()
+        await self.broadcast({"type": "config_updated", "config": self.get_public_config()})
+        return {"ok": True, "chosen": chosen, **state}
+
     async def handle_avatar_interaction(self, kind: str = "pet") -> dict[str, Any]:
-        """頭なでなで (`pet`) やほっぺつつき (`poke`) のインタラクションを受け付け、親密度上昇とツンデレ反応を発火する。"""
+        """頭なでなで (`pet`) やほっぺつつき (`poke`) のインタラクションを受け付け、親密度上昇とツンデレ反応を発火する（Agentモード限定）。"""
+        if config.mode == "vtuber":
+            return {"ok": False, "error": "VTuberモード中はふれあい無効です（初期ペルソナ維持）"}
         if not config.interaction_enabled:
             return {"ok": False, "error": "インタラクション反応は無効です"}
         k = (kind or "pet").strip().lower()
@@ -212,6 +230,15 @@ class AgentOrchestrator:
         self.live_connector.start()
         await self.discord_connector.sync_state()
         self.sync_voice_listener()
+
+        # 起動時の自動ランダム着替え（startup / random / daily）
+        oam = str(config.outfit_auto_mode or "time_only").strip().lower()
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        if oam in ("startup", "random"):
+            await self.pick_random_outfit(exclude_current=True)
+        elif oam == "daily" and config.outfit_last_daily_date != today_str:
+            config.outfit_last_daily_date = today_str
+            await self.pick_random_outfit(exclude_current=True)
 
     def sync_voice_listener(self) -> None:
         """設定に応じてローカル VAD + Whisper マイク待機スレッドを開始または停止する。"""
@@ -858,8 +885,9 @@ class AgentOrchestrator:
                 self.last_cache_cleanup_time = now
                 tts_engine.cleanup_old_cache()
 
-            # 時間帯連動の自動着替え（深夜 23:00〜05:59 はパジャマへ、朝 07:00〜22:59 は標準へ）
-            if config.auto_outfit_by_time:
+            # 自動着せ替え制御（off / time_only / daily / startup / interval / random）
+            oam = str(config.outfit_auto_mode or "time_only").strip().lower()
+            if oam == "time_only" and config.auto_outfit_by_time:
                 h_now = datetime.datetime.now().hour
                 cur_band = "sleep_time" if (h_now >= 23 or h_now < 6) else "awake_time"
                 if self.last_time_outfit_period != cur_band:
@@ -873,6 +901,15 @@ class AgentOrchestrator:
                         config.active_outfit = "default"
                         config.save_persona_settings()
                         await self.broadcast_appearance_state()
+            elif oam == "daily":
+                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                if config.outfit_last_daily_date != today_str:
+                    config.outfit_last_daily_date = today_str
+                    await self.pick_random_outfit(exclude_current=True)
+            elif oam in ("interval", "random"):
+                interval_sec = max(300.0, float(int(config.outfit_interval_min or 60) * 60))
+                if (now - self.last_outfit_random_time) >= interval_sec:
+                    await self.pick_random_outfit(exclude_current=True)
 
             # 天気連動背景演出の定期チェック（30分ごと）
             if config.weather_bg_effect_enabled and (now - self.last_weather_bg_check) >= 1800.0:

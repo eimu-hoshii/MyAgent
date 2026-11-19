@@ -1479,6 +1479,8 @@ async def execute_agent_tool(
         return windows_control_manager.media_action(action=action, steps=steps)
 
     if name == "change_appearance":
+        if config.mode == "vtuber" or event_source in (EventSource.LIVE_COMMENT, EventSource.SUPERCHAT):
+            return "VTuberモード中・リスナーコメントからは衣装を変更できません。"
         outfit = str(arguments.get("outfit", "") or "").strip().lower()
         add_acc = str(arguments.get("add_accessory", "") or "").strip().lower()
         rem_acc = str(arguments.get("remove_accessory", "") or "").strip().lower()
@@ -1487,9 +1489,31 @@ async def execute_agent_tool(
 
         avail_ids = {o["id"]: o for o in list_available_outfits() if o.get("available")}
         if outfit:
-            if outfit in avail_ids:
-                config.active_outfit = outfit
-                changes.append(f"衣装を「{avail_ids[outfit]['name']}」に変更")
+            matched_id = outfit if outfit in avail_ids else ""
+            if not matched_id:
+                # 固定IDが削除されカスタムIDで作り直されている場合、表示名やキーワードで自動一致させる
+                alias_map = {
+                    "pajama": ("パジャマ", "部屋着"),
+                    "maid": ("メイド",),
+                    "yukata": ("浴衣",),
+                    "miko": ("巫女",),
+                    "casual": ("私服", "ニット"),
+                    "hoodie_street": ("パーカー", "ストリート"),
+                    "gym_jersey": ("ジャージ",),
+                    "gym_shorts": ("体操服", "ブルマ", "ショーツ"),
+                    "swim_tankini": ("水着",),
+                    "swim_highneck": ("水着",),
+                    "sailor": ("セーラー",),
+                }
+                kws = alias_map.get(outfit, (outfit,))
+                for aid, meta in avail_ids.items():
+                    nm = str(meta.get("name", "")).lower()
+                    if any(k.lower() in nm for k in kws):
+                        matched_id = aid
+                        break
+            if matched_id:
+                config.active_outfit = matched_id
+                changes.append(f"衣装を「{avail_ids[matched_id]['name']}」に変更")
             else:
                 return f"指定された衣装「{outfit}」は見つかりませんでした（利用可能: {', '.join(avail_ids.keys())}）。"
 
@@ -1555,7 +1579,6 @@ VTUBER_TOOLS_SPEC = """
 3. "fetch_webpage": {"url": "https://..."} -> 指定したURLのWebページ本文テキストを深掘り取得して詳細を確認する。
 4. "vision_capture": {"target": "active_window | fullscreen | clipboard"} -> 現在の配信画面やウィンドウをキャプチャして視覚認識する。
 5. "system_diagnostics": {} -> 配信PCのメモリ・ディスク・現在時刻などを診断する。
-6. "change_appearance": {"outfit": "default | pajama | casual | maid", "add_accessory": "cat_ears | glasses | headphones | ribbon | blush", "remove_accessory": "..."} -> ニア自身の衣装やアクセサリーを着替える。
 """
 
 

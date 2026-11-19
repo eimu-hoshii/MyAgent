@@ -287,8 +287,7 @@ export class AvatarRenderer {
             full.src = `/assets/outfits/${encodeURIComponent(nextId)}/full.png?${q}`;
             this.outfitImages[nextId] = { bust, full };
         }
-        if ((changed || forceReload) && withSparkle) {
-            this.outfitChangeUntil = performance.now() + 1150;
+        if (changed || forceReload) {
             this.emotionTriggerTime = performance.now();
         }
     }
@@ -956,24 +955,6 @@ export class AvatarRenderer {
                 nextHearts.push(p);
             }
             this.hearts = nextHearts;
-            ctx.restore();
-        }
-
-        // 着替え変身時のキラキラパーティクルエフェクト
-        if (now < this.outfitChangeUntil) {
-            const remain = (this.outfitChangeUntil - now) / 1150.0;
-            ctx.save();
-            for (let i = 0; i < 20; i++) {
-                const ang = (i / 20) * Math.PI * 2 + now * 0.004;
-                const rad = (0.14 + (1 - remain) * 0.34) * Math.min(w, h);
-                const px = cx + Math.cos(ang) * rad;
-                const py = cy * 0.92 + Math.sin(ang) * rad * 0.85;
-                ctx.fillStyle = i % 2 === 0
-                    ? `rgba(244, 114, 182, ${(remain * 0.9).toFixed(2)})`
-                    : `rgba(253, 224, 71, ${(remain * 0.9).toFixed(2)})`;
-                ctx.font = `bold ${14 + (i % 3) * 4}px sans-serif`;
-                ctx.fillText("✦", px, py);
-            }
             ctx.restore();
         }
 

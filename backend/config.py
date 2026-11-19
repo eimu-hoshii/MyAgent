@@ -474,10 +474,13 @@ class AgentConfig:
     # ⑨ 可愛さ・着せ替え・インタラクション・親密度設定
     active_outfit: str = "default"  # "default" | "pajama" | "casual" | "maid" | カスタムID
     active_accessories: list[str] = field(default_factory=list)
-    auto_outfit_by_time: bool = True  # 深夜帯 (23:00〜05:59) に自動でパジャマへお着替え
-    weather_bg_effect_enabled: bool = True  # 時間帯・天気連動の背景ライティング＆雨粒演出
-    interaction_enabled: bool = True  # 頭なでなで・ほっぺつつき・マウス追従
-    affection_enabled: bool = True  # 親密度（ツン⇄デレ度）システム
+    auto_outfit_by_time: bool = True  # 後方互換フラグ（outfit_auto_mode=="time_only"相当）
+    outfit_auto_mode: str = "time_only"  # "off" | "time_only" | "daily" | "startup" | "interval" | "random"
+    outfit_interval_min: int = 60  # "interval" / "random" 時の自動ランダム着替え間隔（分）
+    outfit_last_daily_date: str = ""  # 日替わり着替え最終適用日 (YYYY-MM-DD)
+    weather_bg_effect_enabled: bool = False  # 背景グラデーション・星・雨演出（デフォルトOFF）
+    interaction_enabled: bool = True  # 頭なでなで・ほっぺつつき・マウス追従（Agentモードのみ）
+    affection_enabled: bool = True  # 親密度（ツン⇄デレ度）システム（Agentモードのみ）
 
     # 優先して選択するローカルOllamaモデルの候補リスト
     preferred_ollama_models: list[str] = field(
@@ -661,6 +664,7 @@ class AgentConfig:
             ("audio_cache_max_age_min", 1, 1440),
             ("obs_ws_port", 1, 65535),
             ("vtuber_screen_watch_interval_sec", 5, 300),
+            ("outfit_interval_min", 5, 720),
         ]
         for fname, vmin, vmax in int_fields:
             if fname in data and data[fname] is not None:
@@ -669,6 +673,13 @@ class AgentConfig:
                     setattr(self, fname, val)
                 except Exception:
                     pass
+
+        if "outfit_auto_mode" in data and data["outfit_auto_mode"] is not None:
+            oam = str(data["outfit_auto_mode"]).strip().lower()
+            if oam in ("off", "time_only", "daily", "startup", "interval", "random"):
+                self.outfit_auto_mode = oam
+        if "outfit_last_daily_date" in data and data["outfit_last_daily_date"] is not None:
+            self.outfit_last_daily_date = str(data["outfit_last_daily_date"]).strip()[:20]
 
         float_fields = [
             ("mascot_scale", 0.4, 2.0),
