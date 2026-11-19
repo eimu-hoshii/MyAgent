@@ -490,6 +490,64 @@ async def apply_skill_preset_api(payload: dict[str, Any] = Body(...)) -> dict[st
     return {"ok": True, "preset_id": preset_id, "preset": res["preset"], **state_payload}
 
 
+@app.get("/api/outfits")
+async def list_outfits_api() -> dict[str, Any]:
+    """利用可能な衣装・アクセサリー・親密度・時間帯/天気環境状態を返す。"""
+    from backend.config import ACCESSORY_CATALOG
+    from backend.tools import list_available_outfits
+
+    return {
+        "ok": True,
+        "active_outfit": config.active_outfit,
+        "active_accessories": list(config.active_accessories or []),
+        "outfits": list_available_outfits(),
+        "accessories": list(ACCESSORY_CATALOG.values()),
+        "affection": memory_manager.get_affection_state(),
+        "environment": orchestrator.get_environment_state(),
+    }
+
+
+@app.post("/api/appearance")
+async def update_appearance_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """衣装やアクセサリー装着状態、時間帯自動着替え・天気背景演出を更新して全クライアントへ配信する。"""
+    from backend.config import ACCESSORY_CATALOG
+    from backend.tools import list_available_outfits
+
+    avail_ids = {o["id"] for o in list_available_outfits() if o.get("available")}
+    if "outfit" in payload and payload["outfit"] is not None:
+        oid = str(payload["outfit"]).strip().lower()
+        if oid in avail_ids:
+            config.active_outfit = oid
+    if "toggle_accessory" in payload and payload["toggle_accessory"]:
+        acc = str(payload["toggle_accessory"]).strip().lower()
+        if acc in ACCESSORY_CATALOG:
+            cur = list(config.active_accessories or [])
+            if acc in cur:
+                cur.remove(acc)
+            else:
+                cur.append(acc)
+            config.active_accessories = cur
+    if "accessories" in payload and isinstance(payload["accessories"], list):
+        config.active_accessories = [
+            str(a).strip().lower() for a in payload["accessories"] if str(a).strip().lower() in ACCESSORY_CATALOG
+        ]
+    for bf in ("auto_outfit_by_time", "weather_bg_effect_enabled", "interaction_enabled", "affection_enabled"):
+        if bf in payload and payload[bf] is not None:
+            setattr(config, bf, bool(payload[bf]))
+
+    config.save_persona_settings()
+    state = await orchestrator.broadcast_appearance_state()
+    await orchestrator.broadcast({"type": "config_updated", "config": orchestrator.get_public_config()})
+    return {"ok": True, **state}
+
+
+@app.post("/api/interact")
+async def interact_avatar_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """頭なでなで (`pet`) やほっぺつつき (`poke`) のインタラクションを実行する。"""
+    kind = str(payload.get("kind", "pet") or "pet").strip().lower()
+    return await orchestrator.handle_avatar_interaction(kind=kind)
+
+
 @app.post("/api/tasks")
 async def add_task_api(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """UIからカレンダー予定・タスク・リマインダーを追加する。"""

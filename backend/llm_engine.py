@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any, Callable, Coroutine, Optional
 import httpx
-from backend.config import config
+from backend.config import ACCESSORY_CATALOG, OUTFIT_CATALOG, config
 from backend.guardrail import sanitize_agent_speech
 from backend.memory import memory_manager
 from backend.models import AgentEvent, AgentStructuredOutput, EmotionType, EventSource
@@ -433,9 +433,21 @@ class LLMEngine:
 
         topic_text = f"\n【現在の配信テーマ】{config.stream_topic}\n" if (config.mode == "vtuber" and config.stream_topic) else ""
 
+        outfit_info = OUTFIT_CATALOG.get(config.active_outfit, {"name": config.active_outfit})
+        acc_names = [ACCESSORY_CATALOG[a]["name"] for a in (config.active_accessories or []) if a in ACCESSORY_CATALOG]
+        appearance_text = (
+            f"\n【現在の見た目・親密度】\n"
+            f"- 現在の服装: {outfit_info['name']} / アクセサリー: {', '.join(acc_names) if acc_names else 'なし'}\n"
+        )
+        if config.affection_enabled:
+            aff = memory_manager.get_affection_state()
+            appearance_text += (
+                f"- マスターとの親密度: Lv.{aff['level']}「{aff['title']}」({aff['points']}pt) — {aff['prompt_hint']}\n"
+            )
+
         return (
             f"{base_persona}\n\n"
-            f"{fact_check_rule}\n{bilingual_rule}{topic_text}\n"
+            f"{fact_check_rule}\n{bilingual_rule}{topic_text}{appearance_text}\n"
             f"{private_context}"
             f"{build_tools_spec()}\n\n"
             f"{_build_structured_output_instruction(config.bilingual_enabled, target_lang_label)}"
@@ -816,6 +828,50 @@ class LLMEngine:
         return None
 
     @staticmethod
+    def _detect_direct_appearance_command(text: str) -> dict[str, Any] | None:
+        """「メイド服に着替えて」「猫耳つけて」「メガネ外して」等の着せ替え指示を確実に検出する。"""
+        raw = (text or "").strip()
+        if not raw or len(raw) > 56:
+            return None
+        low = raw.lower()
+        if any(ng in low for ng in ("?", "？", "似合う", "どう思", "しないで", "着替えないで")):
+            return None
+
+        args: dict[str, Any] = {}
+        change_verb = any(
+            v in raw for v in ("着替え", "にして", "になって", "に着", "着て", "へ戻", "に戻", "つけて", "付けて", "かけて", "掛けて", "装着", "外して", "とって", "取って", "チェンジ")
+        )
+        if not change_verb:
+            return None
+
+        if any(w in low for w in ("パジャマ", "部屋着", "ルームウェア", "pajama")):
+            args["outfit"] = "pajama"
+        elif any(w in low for w in ("メイド", "maid")):
+            args["outfit"] = "maid"
+        elif any(w in low for w in ("私服", "ニット", "デート服", "casual")):
+            args["outfit"] = "casual"
+        elif any(w in low for w in ("制服", "ブレザー", "標準", "元に戻", "元の服", "default")):
+            args["outfit"] = "default"
+
+        is_remove = any(w in raw for w in ("外して", "とって", "取って", "なし", "オフ"))
+        if any(w in raw for w in ("全部外", "すべて外", "アクセサリー外", "小物外")):
+            args["clear_accessories"] = True
+        else:
+            acc_map = [
+                ("cat_ears", ("猫耳", "ねこみみ", "ネコ耳")),
+                ("glasses", ("メガネ", "眼鏡", "めがね")),
+                ("headphones", ("ヘッドホン", "ヘッドフォン")),
+                ("ribbon", ("リボン", "りぼん")),
+                ("blush", ("赤面", "チーク", "照れ")),
+            ]
+            for acc_id, kws in acc_map:
+                if any(k in raw for k in kws):
+                    args["remove_accessory" if is_remove else "add_accessory"] = acc_id
+                    break
+
+        return args or None
+
+    @staticmethod
     def _is_briefing_request(event: AgentEvent) -> bool:
         """定時ブリーフィングワークフローまたはユーザー/Discordからの戦術ブリーフィング要求かを判定する。"""
         if config.mode != "agent":
@@ -893,6 +949,37 @@ class LLMEngine:
         streamed_sentences: list[str] = []
         executed_windows_actions: set[str] = set()
         prefetched_briefing_tools: set[str] = set()
+        executed_appearance_direct = False
+
+        # 着せ替え・アクセサリー指示は空振りゼロで即座に反映し、照れ反応セリフを1パス生成
+        if event.source in (EventSource.USER_TEXT, EventSource.USER_VOICE, EventSource.DISCORD, EventSource.LIVE_COMMENT):
+            direct_app = self._detect_direct_appearance_command(event.content)
+            if direct_app:
+                app_obs = await execute_agent_tool("change_appearance", direct_app, event_source=event.source)
+                executed_appearance_direct = True
+                if on_status_Callback:
+                    await on_status_Callback(
+                        {
+                            "type": "tool_execution",
+                            "tool_name": "change_appearance",
+                            "arguments": direct_app,
+                            "thought": "リクエストに合わせて衣装・アクセサリーを着替えます。",
+                            "emotion": EmotionType.SMILE.value,
+                        }
+                    )
+                    await on_status_Callback(
+                        {"type": "tool_result", "tool_name": "change_appearance", "observation": app_obs}
+                    )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"【着せ替え完了通知】\n{app_obs}\n\n"
+                            "※既に着替えは画面へ反映済みです。追加の `tool_call` は必ず `null` にし、"
+                            "着替えた服装やアクセサリーについて少し照れながら可愛く（ツンデレらしく）反応してください。"
+                        ),
+                    }
+                )
 
         # 定時ブリーフィング・戦術ブリーフィング時は天気・ニュース・システム診断の実データを100%先行取得して注入
         if self._is_briefing_request(event):
@@ -1068,7 +1155,9 @@ class LLMEngine:
             if (
                 tool_name.strip().lower() == "windows_control"
                 and str(tool_args.get("action", "")).strip().lower() in executed_windows_actions
-            ) or (tool_name.strip().lower() in prefetched_briefing_tools):
+            ) or (tool_name.strip().lower() in prefetched_briefing_tools) or (
+                executed_appearance_direct and tool_name.strip().lower() == "change_appearance"
+            ):
                 parsed.tool_call = None
                 streamed_sentences.extend(step_sentences)
                 break
@@ -1200,6 +1289,13 @@ class LLMEngine:
             session_key=str((event.metadata or {}).get("session_key") or ""),
             speech_sub=parsed.speech_sub,
         )
+
+        if config.affection_enabled and event.source in (
+            EventSource.USER_TEXT,
+            EventSource.USER_VOICE,
+            EventSource.DISCORD,
+        ):
+            memory_manager.add_affection(delta=2, kind="chat")
 
         return parsed
 

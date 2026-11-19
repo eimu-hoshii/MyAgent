@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=8";
+import { AvatarRenderer } from "./avatar.js?v=9";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -34,6 +34,9 @@ class AgentController {
         if (this.isMascotMode) {
             this.avatar.setViewMode("full");
         }
+        this.availableOutfits = [];
+        this.availableAccessories = [];
+        this.avatar.onInteract = (kind) => this._sendAvatarInteraction(kind);
 
         this.ws = null;
         this.audioCtx = null;
@@ -564,6 +567,15 @@ class AgentController {
             bilingualBtn.addEventListener("click", () => {
                 const nextEnabled = !this.currentConfig.bilingual_enabled;
                 this.updateConfig({ bilingual_enabled: nextEnabled });
+            });
+        }
+        const pointerModeBtn = document.getElementById("btn-pointer-mode");
+        if (pointerModeBtn) {
+            pointerModeBtn.addEventListener("click", () => {
+                const nextMode = this.avatar.pointerMode === "interact" ? "pan" : "interact";
+                this.avatar.setPointerMode(nextMode);
+                pointerModeBtn.classList.toggle("active", nextMode === "interact");
+                pointerModeBtn.textContent = nextMode === "interact" ? "✋ ふれあいON" : "✥ 位置移動モード";
             });
         }
 
@@ -1834,6 +1846,21 @@ class AgentController {
                 this._renderKaraokeTracks(data.karaoke_tracks || []);
                 this._renderPollOverlay(data.poll || null);
                 this._renderInitialHistory(data.history || []);
+                this._renderAppearanceState(
+                    {
+                        active_outfit: data.config?.active_outfit,
+                        active_accessories: data.config?.active_accessories,
+                        outfits: data.outfits,
+                        accessories: data.accessories,
+                        affection: data.affection,
+                        environment: data.environment,
+                    },
+                    false
+                );
+                break;
+
+            case "appearance_updated":
+                this._renderAppearanceState(data, true);
                 break;
 
             case "model_routed":
@@ -2038,6 +2065,12 @@ class AgentController {
                 if (data.tasks) this._renderTasks(data.tasks);
                 if (data.viewers) this._renderViewers(data.viewers);
                 if (data.rag_stats) this._renderRagStats(data.rag_stats);
+                if (data.affection || data.environment) {
+                    this._renderAppearanceState(
+                        { affection: data.affection, environment: data.environment },
+                        false
+                    );
+                }
                 if (!data.voice_muted && !this.currentConfig.voice_muted) {
                     if (streamedCount > 0 && this.speechStreamQueue) {
                         this.speechStreamQueue.finalized = true;
@@ -2906,6 +2939,114 @@ class AgentController {
             this._updateRouterPill("manual", activeM, "手動固定");
         } else {
             this._updateRouterPill(routingMode === "auto" ? "balanced" : routingMode, activeM, "待機");
+        }
+        this.avatar.interactionEnabled = cfg.interaction_enabled !== false;
+        this.avatar.setEnvironment(null, cfg.weather_bg_effect_enabled !== false);
+    }
+
+    async _sendAvatarInteraction(kind) {
+        try {
+            const res = await fetch("/api/interact", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ kind }),
+            }).then((r) => r.json());
+            if (res && res.ok && res.affection) {
+                this._renderAppearanceState({ affection: res.affection }, false);
+                if (res.affection.leveled_up) {
+                    this.avatar.triggerActionEffect("celebrate", 2600);
+                    this._playSE("superchat");
+                    this._appendThoughtItem(
+                        `[親密度アップ!] Lv.${res.affection.level}「${res.affection.title}」に到達しました！`,
+                        "tool"
+                    );
+                }
+            }
+        } catch (e) {
+            console.warn("インタラクション送信失敗:", e);
+        }
+    }
+
+    _renderAppearanceState(state, withSparkle = false) {
+        if (!state) return;
+        if (Array.isArray(state.outfits) && state.outfits.length > 0) {
+            this.availableOutfits = state.outfits;
+        }
+        if (Array.isArray(state.accessories) && state.accessories.length > 0) {
+            this.availableAccessories = state.accessories;
+        }
+        if (state.active_outfit !== undefined) {
+            this.currentConfig.active_outfit = state.active_outfit;
+            this.avatar.setOutfit(state.active_outfit, withSparkle);
+        }
+        if (Array.isArray(state.active_accessories)) {
+            this.currentConfig.active_accessories = state.active_accessories;
+            this.avatar.setAccessories(state.active_accessories);
+        }
+        if (state.environment) {
+            this.avatar.setEnvironment(state.environment, this.currentConfig.weather_bg_effect_enabled !== false);
+            const envPill = document.getElementById("env-weather-pill");
+            if (envPill) {
+                const pMap = { morning: "🌅 朝", day: "☀️ 昼", evening: "🌇 夕方", night: "🌙 夜" };
+                const wMap = { rain: " / 🌧️ 雨", cloudy: " / ☁️ 曇", clear: "" };
+                envPill.textContent = `${pMap[state.environment.time_period] || "☀️ 昼"}${wMap[state.environment.weather_kind] || ""}`;
+            }
+        }
+        if (state.affection) {
+            const aff = state.affection;
+            const txt = document.getElementById("affection-text");
+            const fill = document.getElementById("affection-fill");
+            if (txt) txt.textContent = `❤️ Lv.${aff.level} ${aff.title} (${aff.points}pt)`;
+            if (fill) fill.style.width = `${Math.max(4, Math.min(100, Number(aff.progress_pct) || 0))}%`;
+        }
+
+        // 衣装ボタン描画
+        const outfitGroup = document.getElementById("outfit-btn-group");
+        if (outfitGroup && this.availableOutfits.length > 0) {
+            const curOutfit = this.currentConfig.active_outfit || "default";
+            outfitGroup.innerHTML = "";
+            for (const o of this.availableOutfits) {
+                if (o.available === false) continue;
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = `outfit-btn ${o.id === curOutfit ? "active" : ""}`;
+                btn.textContent = o.short ? `${(o.name || "").split(" ")[0]} ${o.short}` : o.name;
+                btn.title = o.description || o.name;
+                btn.addEventListener("click", async () => {
+                    try {
+                        await fetch("/api/appearance", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ outfit: o.id }),
+                        });
+                    } catch (_) {}
+                });
+                outfitGroup.appendChild(btn);
+            }
+        }
+
+        // アクセサリーボタン描画
+        const accGroup = document.getElementById("accessory-btn-group");
+        if (accGroup && this.availableAccessories.length > 0) {
+            const activeSet = new Set(this.currentConfig.active_accessories || []);
+            accGroup.innerHTML = "";
+            for (const a of this.availableAccessories) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = `acc-btn ${activeSet.has(a.id) ? "active" : ""}`;
+                btn.textContent = a.name;
+                btn.title = `${a.name} を着脱する`;
+                btn.addEventListener("click", async () => {
+                    try {
+                        await fetch("/api/appearance", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ toggle_accessory: a.id }),
+                        });
+                    } catch (_) {}
+                });
+                accGroup.appendChild(btn);
+            }
         }
     }
 

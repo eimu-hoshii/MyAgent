@@ -27,6 +27,7 @@ if os.name == "nt":
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHAR_DIR = os.path.join(BASE_DIR, "frontend", "assets", "character")
+OUTFITS_DIR = os.path.join(BASE_DIR, "frontend", "assets", "outfits")
 API_BASE = "http://127.0.0.1:8000"
 # キャラクターの黒髪のフチに馴染む極暗色を透過カラーキーに使用
 TRANSPARENT_KEY = "#040507"
@@ -56,6 +57,7 @@ class NativeDesktopMascot:
         self.position_mode = "bottom-right"
         self.click_through_hover = False
         self.current_emotion = "normal"
+        self.active_outfit = "default"
         self.is_blinking = False
         self.next_blink_time = time.time() + 2.8
         self.blink_end_time = 0.0
@@ -68,6 +70,7 @@ class NativeDesktopMascot:
         self.sprite_cache: dict[str, ImageTk.PhotoImage] = {}
         self.raw_full_cache: dict[str, Image.Image] = {}
         self.raw_bust_cache: dict[str, Image.Image] = {}
+        self.raw_outfit_cache: dict[str, Image.Image] = {}
 
         self._drag_start_x = 0
         self._drag_start_y = 0
@@ -402,39 +405,65 @@ class NativeDesktopMascot:
         self.raw_full_cache[emotion] = img
         return img
 
+    def _load_raw_outfit(self, outfit_id: str, view_mode: str) -> Image.Image | None:
+        """カスタム衣装（パジャマ・私服・メイド服等）の透過立ち絵を読み込む。"""
+        kind = "full" if view_mode == "full" else "bust"
+        key = f"{outfit_id}_{kind}"
+        if key in self.raw_outfit_cache:
+            return self.raw_outfit_cache[key]
+        fpath = os.path.join(OUTFITS_DIR, outfit_id, f"{kind}.png")
+        if not os.path.exists(fpath):
+            fpath = os.path.join(OUTFITS_DIR, outfit_id, "full.png")
+        if not os.path.exists(fpath):
+            return None
+        img = Image.open(fpath).convert("RGBA")
+        self.raw_outfit_cache[key] = img
+        return img
+
     def _get_composite_sprite(self, emotion: str, eye_state: str, vowel: str) -> ImageTk.PhotoImage | None:
         """
-        現在の表示モード（全身/バストアップ）・感情・瞬き・口形に対応する透過済みPhotoImageを生成・キャッシュする。
+        現在の衣装・表示モード（全身/バストアップ）・感情・瞬き・口形に対応する透過済みPhotoImageを生成・キャッシュする。
         全身モード時も顔パーツを合成して瞬き＆口パクに対応する。
         """
         cw, ch = self._get_canvas_dimensions()
-        cache_key = f"{self.view_mode}_{emotion}_{eye_state}_{vowel}_{cw}x{ch}"
+        cache_key = f"{self.active_outfit}_{self.view_mode}_{emotion}_{eye_state}_{vowel}_{cw}x{ch}"
         if cache_key in self.sprite_cache:
             return self.sprite_cache[cache_key]
 
-        bust_img = self._load_raw_bust(emotion, eye_state, vowel)
-        if bust_img is None:
-            return None
-
-        if self.view_mode == "full":
-            full_base = self._load_raw_full(emotion)
-            if full_base is None:
-                return None
-            work = full_base.copy()
-            # 瞬き中または発話中はバストアップの顔領域を全身画像へオーバーレイ
-            if eye_state != "open" or vowel != "normal":
-                sx, sy, sw, sh = 265, 340, 310, 185
-                face_patch = bust_img.crop((sx, sy, sx + sw, sy + sh))
-                fw, fh = work.size
-                dx = int(round((497.0 + sx * (701.0 / 825.0)) * (fw / 1696.0)))
-                dy = int(round((35.0 + (sy + 4.0) * (714.0 / 840.0)) * (fh / 2528.0)))
-                dw = int(round((sw * (701.0 / 825.0)) * (fw / 1696.0)))
-                dh = int(round((sh * (714.0 / 840.0)) * (fh / 2528.0)))
-                face_resized = face_patch.resize((dw, dh), Image.Resampling.LANCZOS)
-                work.paste(face_resized, (dx, dy), face_resized)
-            src_rgba = work
+        # デフォルト以外の衣装が選択されている場合は衣装専用立ち絵を優先
+        if self.active_outfit != "default":
+            outfit_img = self._load_raw_outfit(self.active_outfit, self.view_mode)
+            if outfit_img is not None:
+                src_rgba = outfit_img
+            else:
+                src_rgba = None
         else:
-            src_rgba = bust_img
+            src_rgba = None
+
+        if src_rgba is None:
+            bust_img = self._load_raw_bust(emotion, eye_state, vowel)
+            if bust_img is None:
+                return None
+
+            if self.view_mode == "full":
+                full_base = self._load_raw_full(emotion)
+                if full_base is None:
+                    return None
+                work = full_base.copy()
+                # 瞬き中または発話中はバストアップの顔領域を全身画像へオーバーレイ
+                if eye_state != "open" or vowel != "normal":
+                    sx, sy, sw, sh = 265, 340, 310, 185
+                    face_patch = bust_img.crop((sx, sy, sx + sw, sy + sh))
+                    fw, fh = work.size
+                    dx = int(round((497.0 + sx * (701.0 / 825.0)) * (fw / 1696.0)))
+                    dy = int(round((35.0 + (sy + 4.0) * (714.0 / 840.0)) * (fh / 2528.0)))
+                    dw = int(round((sw * (701.0 / 825.0)) * (fw / 1696.0)))
+                    dh = int(round((sh * (714.0 / 840.0)) * (fh / 2528.0)))
+                    face_resized = face_patch.resize((dw, dh), Image.Resampling.LANCZOS)
+                    work.paste(face_resized, (dx, dy), face_resized)
+                src_rgba = work
+            else:
+                src_rgba = bust_img
 
         # アスペクト比を維持してキャンバス内にリサイズ
         iw, ih = src_rgba.size
@@ -499,6 +528,10 @@ class NativeDesktopMascot:
             req = urllib.request.urlopen(f"{API_BASE}/api/status", timeout=1.2)
             data = json.loads(req.read().decode("utf-8"))
             cfg = data.get("config", {})
+            new_outfit = str(cfg.get("active_outfit", "default") or "default").strip()
+            if new_outfit != self.active_outfit:
+                self.active_outfit = new_outfit
+                self.sprite_cache.clear()
             self._desired_topmost = bool(cfg.get("mascot_always_on_top", True))
             if not self._menu_open and self._applied_topmost != self._desired_topmost:
                 self.root.wm_attributes("-topmost", self._desired_topmost)

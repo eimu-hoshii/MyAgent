@@ -23,13 +23,13 @@ flowchart LR
         API["REST API / WebSocket (/ws)"]
         LOOP["自律イベントループ (event_loop.py)"]
         LLM["ハイブリッドLLM脳・先読みパーサ (llm_engine.py)"]
-        TOOLS["自律ツール17種 (tools.py)"]
+        TOOLS["自律ツール18種 (tools.py)"]
         AUTO["HITL承認 / Playwright / MCP / 外部連携 (automation.py)"]
         RAG["ローカル資料検索 RAG / 文書抽出 (rag_engine.py)"]
         VTS["OBS / VTS / 投票 / お便り / 歌枠 (vtuber_studio.py)"]
         GUARD["ト書き除去・出力プライバシーガード (guardrail.py)"]
         TTS["文単位Streaming TTS合成・辞書 (tts_engine.py)"]
-        MEM["SQLite 8テーブル + 意味ベクトルDB (memory.py)"]
+        MEM["SQLite 9テーブル + 意味ベクトルDB (memory.py)"]
     end
 
     subgraph External["外部エンジン / データストレージ"]
@@ -144,7 +144,9 @@ flowchart LR
   - **🧠 長期記憶**: 手動追加 (`＋追加`)、一括消去に加え、**意味検索欄 (`🔍 意味検索`)** から文字一致なしでも類似記憶（`類似 XX%`）を検索可能。**`🧹整理`** ボタン（または30分以上アイドル時の自動睡眠統合）で重複記憶を自動マージ整理します。
   - **📅 予定・監視タスク**: 単発および繰り返しリマインダー (`none` / `hourly` / `daily` / `weekly`) の登録・完了・スヌーズ。
 - **中央ステージ**:
-  - 立ち絵の拡大縮小（ホイール）・位置移動（左ドラッグ）・全身/顔切替・表情/口形手動確認（`フル管制` 時）。
+  - **ワードローブ ＆ ふれあいバー (`.wardrobe-bar`)**: 好感度ゲージ (`Lv.1〜Lv.5`)・時間帯/天気チップ・`✋ ふれあいON ⇄ ✥ 位置移動` トグル・4衣装切替 (`制服` / `パジャマ` / `私服` / `メイド服`)・5種アクセサリー着脱 (`🐱猫耳` / `👓メガネ` / `🎧ヘッドホン` / `🎀リボン` / `🌸チーク`)。
+  - **ふれあいインタラクション**: `✋ ふれあいON` 時は頭部ドラッグで「なでなで」（ハート演出＋照れ音声＋好感度+5）、頬クリックで「つつく」（驚き＋キラキラ＋好感度+2）。位置移動したい場合は `✥ 位置移動` へ切替または `Shift + 左ドラッグ`。
+  - 立ち絵の拡大縮小（ホイール）・全身/顔切替・2.5D呼吸＆カーソル傾き追従・時間帯/天気背景ライティング（OBS/マスコット透過時は自動無効）・表情/口形手動確認（`フル管制` 時）。
   - **ファイル D&D 解析**: `.txt`, `.md`, 画像, `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.mp3`/`.wav` 等を中央ステージへドロップして即座に解析・要約。
   - **HITL コマンド承認バナー**: `run_command` 承認要求時に画面上部へ黄色いバナーが表示され、ワンクリックで「許可して実行 / 拒否」を判断できます。
   - **安定字幕 (`#subtitle-box`)**: LLMが発話全文を確定したタイミング（`speech_ready` / `agent_response`）で完成版セリフを1回だけ表示するため、先読みTTS再生中でも字幕が途中で書き換わらず安定します。また `（笑顔で）` などのト書き括弧は表示・読み上げ直前に自動除去されます。
@@ -209,8 +211,9 @@ flowchart LR
 | 15 | `external_service` | GitHub Issue/PR/Commit/通知、Google カレンダー `.ics`、Gmail 取得 |
 | 16 | `mcp_tool` | 外部 MCP サーバー (`stdio` JSON-RPC) のツール一覧取得＆呼び出し |
 | 17 | `windows_control` | Windows メディア再生・音量操作・アクションセンター通知読取、およびマスター直接指示時の確認なしPCロック(`lock_pc`)・スリープ(`sleep_pc`) |
+| 18 | `change_appearance` | ニアの衣装着替え（`default` / `pajama` / `casual` / `maid` 等）およびアクセサリー着脱（Agent / VTuber 両モード対応） |
 
-### 6.2 SQLite データベース（`data/agent_memory.db`）全8テーブル
+### 6.2 SQLite データベース（`data/agent_memory.db`）全9テーブル
 1. `conversations`: 発話ログ（モード・セッション分離・`speech_sub`・ツール引用元 `evidences_json` 保存）
 2. `memories`: 長期記憶（意味ベクトル `embedding BLOB`・最終参照時刻 `last_accessed`・参照回数 `access_count` 付き）
 3. `tasks`: 予定・アラート・繰り返しタスク
@@ -219,6 +222,7 @@ flowchart LR
 6. `mailbag_items`: 匿名お便り・質問箱アイテム
 7. `stream_sessions`: 配信アーカイブセッション記録
 8. `stream_highlights`: 配信内タイムスタンプハイライト（話題・スパチャ・コメント・企画締切）
+9. `affection_state`: 好感度（ツン⇄デレ度）ポイント・レベル・なでなで/つつき/会話回数永続化
 
 ---
 
@@ -232,6 +236,7 @@ flowchart LR
 | `GET /api/memories/semantic`, `POST /api/memories/consolidate` | 意味ベクトル記憶検索 / 睡眠統合（重複マージ＆整理）即時実行 |
 | `POST /api/mascot/toggle`, `POST /api/speech/stop`, `POST /api/voice/mute` | マスコット起動停止 / 発話停止 / ミュートトグル |
 | `POST /api/engines/aivisspeech/start` | AivisSpeech の二重起動防止付きバックグラウンド裏起動・GUI裏格納 |
+| `GET /api/outfits`, `POST /api/appearance`, `POST /api/interact` | 衣装/アクセ一覧取得 / 衣装・アクセ変更反映 / なでなで・つつき反応＆好感度更新 |
 | `POST /api/vision_analyze`, `/api/clipboard_analyze`, `/api/upload_analyze` | 画面解析・クリップボード・ファイルアップロード解析 |
 | `GET/POST/DELETE /api/agent/workflows...` | 定時自律ワークフロー登録・即時実行・切替・削除 |
 | `POST /api/agent/rag/reindex`, `GET /api/agent/rag/search` | ローカル RAG インデックス更新 / 検索 |

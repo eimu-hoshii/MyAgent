@@ -196,6 +196,43 @@ SKILL_PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
+# キャラクター衣装カタログ（frontend/assets/outfits/<id>/ または default）
+OUTFIT_CATALOG: dict[str, dict[str, str]] = {
+    "default": {
+        "id": "default",
+        "name": "🧥 黒ブレザー制服 (標準)",
+        "short": "制服",
+        "description": "黒ブレザー＋白パーカー＋ルーズソックスの標準スタイル",
+    },
+    "pajama": {
+        "id": "pajama",
+        "name": "🌙 もこもこ部屋着パジャマ",
+        "short": "パジャマ",
+        "description": "夜のリラックスタイム向けオフショルもこもこルームウェア",
+    },
+    "casual": {
+        "id": "casual",
+        "name": "🧶 オフショル私服ニット",
+        "short": "私服",
+        "description": "アイボリーニット＋赤黒チェックミニスカートの休日私服",
+    },
+    "maid": {
+        "id": "maid",
+        "name": "🎀 クラシックメイド服",
+        "short": "メイド服",
+        "description": "黒×白フリル＆赤リボンのツンデレ専用メイド服",
+    },
+}
+
+# Canvas重ね合わせアクセサリーカタログ
+ACCESSORY_CATALOG: dict[str, dict[str, str]] = {
+    "cat_ears": {"id": "cat_ears", "name": "🐱 猫耳"},
+    "glasses": {"id": "glasses", "name": "👓 メガネ"},
+    "headphones": {"id": "headphones", "name": "🎧 ヘッドホン"},
+    "ribbon": {"id": "ribbon", "name": "🎀 赤リボン"},
+    "blush": {"id": "blush", "name": "😳 照れチーク"},
+}
+
 
 @dataclass
 class AgentConfig:
@@ -363,6 +400,14 @@ class AgentConfig:
     bilingual_target_lang: str = "en"  # "en" | "ko" | "zh"
     windows_power_control_enabled: bool = True  # 確認バナーなしで PC ロック・スリープ即時実行を許可（Agentモード限定）
 
+    # ⑨ 可愛さ・着せ替え・インタラクション・親密度設定
+    active_outfit: str = "default"  # "default" | "pajama" | "casual" | "maid" | カスタムID
+    active_accessories: list[str] = field(default_factory=list)
+    auto_outfit_by_time: bool = True  # 深夜帯 (23:00〜05:59) に自動でパジャマへお着替え
+    weather_bg_effect_enabled: bool = True  # 時間帯・天気連動の背景ライティング＆雨粒演出
+    interaction_enabled: bool = True  # 頭なでなで・ほっぺつつき・マウス追従
+    affection_enabled: bool = True  # 親密度（ツン⇄デレ度）システム
+
     # 優先して選択するローカルOllamaモデルの候補リスト
     preferred_ollama_models: list[str] = field(
         default_factory=lambda: [
@@ -454,6 +499,7 @@ class AgentConfig:
             "ollama_model_fast",
             "ollama_model_smart",
             "bilingual_target_lang",
+            "active_outfit",
         ]
         for sf in str_fields:
             if sf in data and data[sf] is not None:
@@ -517,6 +563,10 @@ class AgentConfig:
             "semantic_memory_enabled",
             "memory_auto_consolidate",
             "bilingual_enabled",
+            "auto_outfit_by_time",
+            "weather_bg_effect_enabled",
+            "interaction_enabled",
+            "affection_enabled",
         ]
         for bf in bool_fields:
             if bf in data and data[bf] is not None:
@@ -576,6 +626,7 @@ class AgentConfig:
             "file_allowed_dirs",
             "rag_dirs",
             "vtuber_private_blocklist",
+            "active_accessories",
         ):
             if str_list_field in data and data[str_list_field] is not None:
                 raw_val = data[str_list_field]

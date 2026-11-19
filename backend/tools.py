@@ -27,13 +27,45 @@ import xml.etree.ElementTree as ET
 from typing import Any
 import httpx
 from PIL import ImageGrab
-from backend.config import VISION_CAPTURE_DIR, config
+from backend.config import ACCESSORY_CATALOG, BASE_DIR, OUTFIT_CATALOG, VISION_CAPTURE_DIR, config
 from backend.memory import memory_manager
 from backend.models import EventSource
 
 
 # サーバー側で直接実行できないクライアント側アクション（URLをブラウザで開く等）の待ち行列
 PENDING_CLIENT_ACTIONS: list[dict[str, Any]] = []
+# 衣装・アクセサリー変更時にオーケストレーターへ即時通知するフック
+APPEARANCE_CHANGED_CALLBACK: Any = None
+
+
+def list_available_outfits() -> list[dict[str, Any]]:
+    """利用可能な衣装一覧（標準＋frontend/assets/outfits 配下の自動検出カスタム衣装）を返す。"""
+    outfits_root = os.path.join(BASE_DIR, "frontend", "assets", "outfits")
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for oid, meta in OUTFIT_CATALOG.items():
+        if oid == "default":
+            available = True
+        else:
+            available = os.path.isfile(os.path.join(outfits_root, oid, "full.png"))
+        items.append({**meta, "available": available})
+        seen.add(oid)
+    if os.path.isdir(outfits_root):
+        for entry in sorted(os.listdir(outfits_root)):
+            if entry in seen:
+                continue
+            full_p = os.path.join(outfits_root, entry, "full.png")
+            if os.path.isfile(full_p):
+                items.append(
+                    {
+                        "id": entry,
+                        "name": f"✨ カスタム衣装 ({entry})",
+                        "short": entry,
+                        "description": f"カスタム追加衣装 ({entry})",
+                        "available": True,
+                    }
+                )
+    return items
 # 直近の画面キャプチャ結果を保持し、ツール実行とLLM画像添付での二重キャプチャを防ぐ
 LAST_CAPTURE_CACHE: dict[str, Any] = {}
 # 気象庁 area.json のキャッシュ（TTL 24時間）
@@ -1409,6 +1441,46 @@ async def execute_agent_tool(
         steps = int(arguments.get("steps", 1) or 1)
         return windows_control_manager.media_action(action=action, steps=steps)
 
+    if name == "change_appearance":
+        outfit = str(arguments.get("outfit", "") or "").strip().lower()
+        add_acc = str(arguments.get("add_accessory", "") or "").strip().lower()
+        rem_acc = str(arguments.get("remove_accessory", "") or "").strip().lower()
+        clear_acc = bool(arguments.get("clear_accessories", False))
+        changes: list[str] = []
+
+        avail_ids = {o["id"]: o for o in list_available_outfits() if o.get("available")}
+        if outfit:
+            if outfit in avail_ids:
+                config.active_outfit = outfit
+                changes.append(f"衣装を「{avail_ids[outfit]['name']}」に変更")
+            else:
+                return f"指定された衣装「{outfit}」は見つかりませんでした（利用可能: {', '.join(avail_ids.keys())}）。"
+
+        acc_list = list(config.active_accessories or [])
+        if clear_acc:
+            acc_list = []
+            changes.append("アクセサリーをすべて外した")
+        if add_acc:
+            if add_acc in ACCESSORY_CATALOG:
+                if add_acc not in acc_list:
+                    acc_list.append(add_acc)
+                changes.append(f"「{ACCESSORY_CATALOG[add_acc]['name']}」を装着")
+        if rem_acc and rem_acc in acc_list:
+            acc_list.remove(rem_acc)
+            label = ACCESSORY_CATALOG.get(rem_acc, {}).get("name", rem_acc)
+            changes.append(f"「{label}」を外した")
+
+        config.active_accessories = acc_list
+        config.save_persona_settings()
+        if APPEARANCE_CHANGED_CALLBACK is not None:
+            try:
+                await APPEARANCE_CHANGED_CALLBACK()
+            except Exception:
+                pass
+        if not changes:
+            return f"現在の服装は「{config.active_outfit}」、アクセサリーは {config.active_accessories or 'なし'} です。"
+        return "【着せ替え完了】" + " / ".join(changes) + "。"
+
     return f"未知のツール名です: {tool_name}"
 
 
@@ -1435,6 +1507,7 @@ def build_tools_spec() -> str:
     spec += '15. "external_service": {"service": "github | calendar | gmail", "action": "issues | prs | commits | notifications | upcoming", "repo": "owner/repo"} -> GitHub/カレンダー/メール情報を取得する。\n'
     spec += '16. "mcp_tool": {"server": "MCPサーバー名", "action": "list_tools | call_tool", "tool_name": "ツール名", "arguments": {}} -> 接続済み外部MCPサーバーのツールを実行する。\n'
     spec += '17. "windows_control": {"action": "play_pause | next_track | prev_track | volume_up | volume_down | volume_mute | notifications | lock_pc | sleep_pc", "steps": 2} -> Windowsメディア/音量操作・通知確認を行う。マスターから明示的にロックやスリープを指示された場合のみ `lock_pc` / `sleep_pc` を確認なしで即実行する。\n'
+    spec += '18. "change_appearance": {"outfit": "default | pajama | casual | maid", "add_accessory": "cat_ears | glasses | headphones | ribbon | blush", "remove_accessory": "..."} -> ニア自身の衣装やアクセサリーを着替える。\n'
     return spec
 
 
@@ -1445,6 +1518,7 @@ VTUBER_TOOLS_SPEC = """
 3. "fetch_webpage": {"url": "https://..."} -> 指定したURLのWebページ本文テキストを深掘り取得して詳細を確認する。
 4. "vision_capture": {"target": "active_window | fullscreen | clipboard"} -> 現在の配信画面やウィンドウをキャプチャして視覚認識する。
 5. "system_diagnostics": {} -> 配信PCのメモリ・ディスク・現在時刻などを診断する。
+6. "change_appearance": {"outfit": "default | pajama | casual | maid", "add_accessory": "cat_ears | glasses | headphones | ribbon | blush", "remove_accessory": "..."} -> ニア自身の衣装やアクセサリーを着替える。
 """
 
 

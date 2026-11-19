@@ -20,7 +20,7 @@ from backend.automation import (
     save_research_report,
     windows_control_manager,
 )
-from backend.config import AUDIO_CACHE_DIR, SKILL_PRESETS, config
+from backend.config import ACCESSORY_CATALOG, AUDIO_CACHE_DIR, SKILL_PRESETS, config
 from backend.discord_connector import DiscordBotConnector
 from backend.guardrail import inspect_incoming_event
 from backend.live_stream import LiveStreamConnector
@@ -28,6 +28,7 @@ from backend.llm_engine import llm_engine
 from backend.memory import memory_manager
 from backend.models import AgentEvent, EventSource
 from backend.rag_engine import rag_engine
+import backend.tools as tools_mod
 from backend.tools import (
     PENDING_CLIENT_ACTIONS,
     capture_screen_image,
@@ -36,8 +37,10 @@ from backend.tools import (
     get_clipboard_text,
     get_system_metrics,
     is_interactive_default_desktop,
+    list_available_outfits,
     set_deep_research_trigger,
     tool_fetch_webpage,
+    tool_get_weather,
     tool_web_search,
 )
 from backend.tts_engine import tts_engine
@@ -109,13 +112,86 @@ class AgentOrchestrator:
             on_transcript=self._on_local_voice_transcript,
         )
 
-        # コマンド承認・非同期調査フックを接続
+        # コマンド承認・非同期調査・着せ替え通知フックを接続
         approval_manager.on_requested = self._on_approval_requested
         approval_manager.on_resolved = self._on_approval_resolved
         set_deep_research_trigger(self.start_deep_research)
+        tools_mod.APPEARANCE_CHANGED_CALLBACK = self.broadcast_appearance_state
+
+        self.last_interact_voice_time: float = 0.0
+        self.current_weather_kind: str = "clear"  # "clear" | "cloudy" | "rain"
+        self.last_weather_bg_check: float = 0.0
+        self.last_time_outfit_period: str = ""
 
         self._worker_task: asyncio.Task[Any] | None = None
         self._proactive_task: asyncio.Task[Any] | None = None
+
+    def get_environment_state(self) -> dict[str, Any]:
+        """現在時刻と天気から背景ライティング用の環境状態を返す。"""
+        hour = datetime.datetime.now().hour
+        if 5 <= hour <= 10:
+            period = "morning"
+        elif 11 <= hour <= 16:
+            period = "day"
+        elif 17 <= hour <= 19:
+            period = "evening"
+        else:
+            period = "night"
+        return {
+            "time_period": period,
+            "hour": hour,
+            "weather_kind": self.current_weather_kind,
+        }
+
+    async def broadcast_appearance_state(self) -> dict[str, Any]:
+        """現在の衣装・アクセサリー・親密度・環境演出状態を全クライアントへ配信する。"""
+        payload = {
+            "type": "appearance_updated",
+            "active_outfit": config.active_outfit,
+            "active_accessories": list(config.active_accessories or []),
+            "outfits": list_available_outfits(),
+            "accessories": list(ACCESSORY_CATALOG.values()),
+            "affection": memory_manager.get_affection_state(),
+            "environment": self.get_environment_state(),
+        }
+        await self.broadcast(payload)
+        return payload
+
+    async def handle_avatar_interaction(self, kind: str = "pet") -> dict[str, Any]:
+        """頭なでなで (`pet`) やほっぺつつき (`poke`) のインタラクションを受け付け、親密度上昇とツンデレ反応を発火する。"""
+        if not config.interaction_enabled:
+            return {"ok": False, "error": "インタラクション反応は無効です"}
+        k = (kind or "pet").strip().lower()
+        delta = 5 if k == "pet" else 2
+        aff = memory_manager.add_affection(delta, kind=k) if config.affection_enabled else memory_manager.get_affection_state()
+        await self.broadcast_appearance_state()
+
+        now = time.time()
+        voice_triggered = False
+        if (now - self.last_interact_voice_time) >= 4.5 and not self.is_processing:
+            self.last_interact_voice_time = now
+            voice_triggered = True
+            lv_note = f"（たった今、親密度が Lv.{aff['level']}「{aff['title']}」へアップしました！）" if aff.get("leveled_up") else ""
+            if k == "pet":
+                prompt = (
+                    f"【インタラクション：頭なでなで】マスターがあなたの頭を優しくなでてきました。{lv_note}"
+                    "嬉しさと照れを隠しきれないツンデレ反応で、1〜2文だけ可愛く短く反応してください。"
+                )
+            else:
+                prompt = (
+                    f"【インタラクション：ほっぺつつき】マスターがあなたのほっぺをツンツンつついてきました。{lv_note}"
+                    "少し驚いたりぷくっと拗ねたりするツンデレ反応で、1〜2文だけ可愛く短く反応してください。"
+                )
+            await self.enqueue_event(
+                AgentEvent(
+                    source=EventSource.USER_TEXT,
+                    user="Master",
+                    content=prompt,
+                    priority=1,
+                    metadata={"interaction": k},
+                )
+            )
+        return {"ok": True, "kind": k, "affection": aff, "voice_triggered": voice_triggered}
 
     async def start(self) -> None:
         """バックグラウンドワーカー、自律監視ループ、実配信コネクタ、Discord Bot、ローカルSTTを起動する。"""
@@ -387,6 +463,10 @@ class AgentOrchestrator:
                     {"id": pid, "name": p["name"], "description": p["description"], "mode": p["mode"]}
                     for pid, p in SKILL_PRESETS.items()
                 ],
+                "outfits": list_available_outfits(),
+                "accessories": list(ACCESSORY_CATALOG.values()),
+                "affection": memory_manager.get_affection_state(),
+                "environment": self.get_environment_state(),
                 "history": memory_manager.get_recent_conversations(
                     limit=min(50, max(10, int(config.conversation_history_limit))),
                     mode=config.mode,
@@ -732,6 +812,8 @@ class AgentOrchestrator:
                         "tasks": memory_manager.get_tasks(status="pending"),
                         "viewers": memory_manager.list_viewers(limit=30),
                         "rag_stats": rag_engine.get_stats(),
+                        "affection": memory_manager.get_affection_state(),
+                        "environment": self.get_environment_state(),
                     }
                 )
 
@@ -773,6 +855,35 @@ class AgentOrchestrator:
             if now - self.last_cache_cleanup_time >= 300.0:
                 self.last_cache_cleanup_time = now
                 tts_engine.cleanup_old_cache()
+
+            # 時間帯連動の自動着替え（深夜 23:00〜05:59 はパジャマへ、朝 07:00〜22:59 は標準へ）
+            if config.auto_outfit_by_time:
+                h_now = datetime.datetime.now().hour
+                cur_band = "sleep_time" if (h_now >= 23 or h_now < 6) else "awake_time"
+                if self.last_time_outfit_period != cur_band:
+                    self.last_time_outfit_period = cur_band
+                    avail_ids = {o["id"] for o in list_available_outfits() if o.get("available")}
+                    if cur_band == "sleep_time" and config.active_outfit == "default" and "pajama" in avail_ids:
+                        config.active_outfit = "pajama"
+                        config.save_persona_settings()
+                        await self.broadcast_appearance_state()
+                    elif cur_band == "awake_time" and config.active_outfit == "pajama":
+                        config.active_outfit = "default"
+                        config.save_persona_settings()
+                        await self.broadcast_appearance_state()
+
+            # 天気連動背景演出の定期チェック（30分ごと）
+            if config.weather_bg_effect_enabled and (now - self.last_weather_bg_check) >= 1800.0:
+                self.last_weather_bg_check = now
+                try:
+                    w_txt = await tool_get_weather("亀岡")
+                    first_day = w_txt.splitlines()[1] if len(w_txt.splitlines()) > 1 else w_txt
+                    new_kind = "rain" if ("雨" in first_day or "雪" in first_day) else ("cloudy" if "くもり" in first_day else "clear")
+                    if new_kind != self.current_weather_kind:
+                        self.current_weather_kind = new_kind
+                        await self.broadcast_appearance_state()
+                except Exception:
+                    pass
 
             # 長期記憶の自動統合整理（Sleep Consolidation: 30分アイドル以上かつ12時間周期）
             if (

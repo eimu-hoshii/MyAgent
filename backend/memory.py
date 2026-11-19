@@ -255,6 +255,17 @@ class MemoryManager:
                     detail TEXT DEFAULT '',
                     created_at REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS affection_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    points INTEGER DEFAULT 0,
+                    pet_count INTEGER DEFAULT 0,
+                    poke_count INTEGER DEFAULT 0,
+                    chat_count INTEGER DEFAULT 0,
+                    last_interact_at REAL DEFAULT 0
+                );
+                INSERT OR IGNORE INTO affection_state (id, points, pet_count, poke_count, chat_count, last_interact_at)
+                VALUES (1, 15, 0, 0, 0, 0);
                 """
             )
             # 既存DBへの repeat_rule / evidences_json / session_key / memories意味ベクトル用カラム追加マイグレーション
@@ -1085,6 +1096,73 @@ class MemoryManager:
             d["started_str"] = datetime.datetime.fromtimestamp(d["started_at"]).strftime("%Y-%m-%d %H:%M")
             res.append(d)
         return res
+
+    @staticmethod
+    def _calc_affection_tier(points: int) -> dict[str, Any]:
+        """親密度ポイントからレベル・称号・進捗率・口調デレ度指針を算出する。"""
+        tiers = [
+            (1, 0, 30, "警戒・ツン全開期", "基本はツン95%・デレ5%。塩対応だが実は気にかけている。"),
+            (2, 30, 80, "ツン強め相棒期", "ツン80%・デレ20%。口は悪いが信頼感を見せ始める。"),
+            (3, 80, 160, "素直になれないツンデレ期", "ツン60%・デレ40%。照れながら気遣いや褒め言葉を漏らす。"),
+            (4, 160, 300, "隠しきれないデレ期", "ツン40%・デレ60%。甘えや心配が隠せず素直に喜ぶことも多い。"),
+            (5, 300, 999999, "最愛パートナー期", "ツン25%・デレ75%。相変わらず少し強がりつつ、深く愛情を込めて寄り添う。"),
+        ]
+        p = max(0, int(points))
+        for lv, low, high, title, hint in tiers:
+            if p < high or lv == 5:
+                if lv == 5:
+                    progress = 100
+                    next_pts = p
+                else:
+                    progress = max(0, min(100, int((p - low) * 100 / max(1, high - low))))
+                    next_pts = high
+                return {
+                    "level": lv,
+                    "title": title,
+                    "progress_pct": progress,
+                    "next_level_points": next_pts,
+                    "prompt_hint": hint,
+                }
+        return {"level": 1, "title": "警戒・ツン全開期", "progress_pct": 0, "next_level_points": 30, "prompt_hint": ""}
+
+    def get_affection_state(self) -> dict[str, Any]:
+        """現在の親密度ステータスを返す。"""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM affection_state WHERE id = 1").fetchone()
+        if not row:
+            pts, pet_c, poke_c, chat_c, last_ts = 15, 0, 0, 0, 0.0
+        else:
+            pts = int(row["points"] or 0)
+            pet_c = int(row["pet_count"] or 0)
+            poke_c = int(row["poke_count"] or 0)
+            chat_c = int(row["chat_count"] or 0)
+            last_ts = float(row["last_interact_at"] or 0.0)
+        tier = self._calc_affection_tier(pts)
+        return {
+            "points": pts,
+            "pet_count": pet_c,
+            "poke_count": poke_c,
+            "chat_count": chat_c,
+            "last_interact_at": last_ts,
+            **tier,
+        }
+
+    def add_affection(self, delta: int, kind: str = "chat") -> dict[str, Any]:
+        """親密度を加算し、最新ステータスとレベルアップ有無を返す。"""
+        prev = self.get_affection_state()
+        new_pts = max(0, prev["points"] + int(delta))
+        col_map = {"pet": "pet_count", "poke": "poke_count", "chat": "chat_count"}
+        inc_col = col_map.get(kind, "chat_count")
+        now = time.time()
+        with self._get_conn() as conn:
+            conn.execute(
+                f"UPDATE affection_state SET points = ?, {inc_col} = {inc_col} + 1, last_interact_at = ? WHERE id = 1",
+                (new_pts, now),
+            )
+        after = self.get_affection_state()
+        after["delta"] = int(delta)
+        after["leveled_up"] = after["level"] > prev["level"]
+        return after
 
 
 memory_manager = MemoryManager()
