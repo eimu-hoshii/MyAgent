@@ -690,6 +690,51 @@ export class AvatarRenderer {
     }
 
     /**
+     * 基準制服スプライト (825x840) から「左目・右目・口」の3領域だけをソフトフェザー楕円マスクで切り出した
+     * オフスクリーンキャンバスを生成して返す（四角い境界線・白パーカー襟の映り込みを100%防ぐ）。
+     */
+    _getSoftFacePatchCanvas(sprite) {
+        if (!this._facePatchCanvas) {
+            this._facePatchCanvas = document.createElement("canvas");
+            this._facePatchCanvas.width = 825;
+            this._facePatchCanvas.height = 840;
+            this._facePatchCtx = this._facePatchCanvas.getContext("2d");
+
+            // ソフトフェザー楕円マスクを1回だけプリレンダリング
+            this._faceMaskCanvas = document.createElement("canvas");
+            this._faceMaskCanvas.width = 825;
+            this._faceMaskCanvas.height = 840;
+            const mctx = this._faceMaskCanvas.getContext("2d");
+            const drawSoftEllipse = (cx, cy, rx, ry) => {
+                mctx.save();
+                mctx.translate(cx, cy);
+                mctx.scale(rx, ry);
+                const g = mctx.createRadialGradient(0, 0, 0.52, 0, 0, 1.0);
+                g.addColorStop(0.0, "rgba(255,255,255,1)");
+                g.addColorStop(0.72, "rgba(255,255,255,0.92)");
+                g.addColorStop(1.0, "rgba(255,255,255,0)");
+                mctx.fillStyle = g;
+                mctx.beginPath();
+                mctx.arc(0, 0, 1.0, 0, Math.PI * 2);
+                mctx.fill();
+                mctx.restore();
+            };
+            // 左目（眉込み）・右目（眉込み）・口の3箇所のみ
+            drawSoftEllipse(340, 384, 72, 46);
+            drawSoftEllipse(496, 384, 72, 46);
+            drawSoftEllipse(418, 492, 54, 30);
+        }
+        const fctx = this._facePatchCtx;
+        fctx.clearRect(0, 0, 825, 840);
+        fctx.globalCompositeOperation = "source-over";
+        fctx.drawImage(sprite, 0, 0, 825, 840);
+        fctx.globalCompositeOperation = "destination-in";
+        fctx.drawImage(this._faceMaskCanvas, 0, 0);
+        fctx.globalCompositeOperation = "source-over";
+        return this._facePatchCanvas;
+    }
+
+    /**
      * 感情連動の可愛い漫画記号（感情変化直後の 2.2秒間）のみをキャラ座標へ重ね描画する。
      */
     _drawAccessoriesAndMarks(ctx, headX, headY, headR, now) {
@@ -821,32 +866,21 @@ export class AvatarRenderer {
             const drawY = -drawH / 2 + (this.viewMode === "full" ? 6 : 12);
             ctx.drawImage(img, drawX, drawY, drawW, drawH);
 
-            // 標準立ち絵ベース衣装（faceSync=true）は基準制服の瞬き・6感情・あいうえお口パクをそのまま重ね描画
+            // 標準立ち絵ベース衣装（faceSync=true）は「左目・右目・口」のソフト楕円マスクでシームレス合成
             const isFaceSync = !!(this.outfitMeta && this.outfitMeta[this.activeOutfit]?.faceSync);
             if (isFaceSync && sprite && sprite.complete && sprite.naturalWidth > 0) {
                 const needOverlay =
                     this.currentEmotion !== "normal" || eyeState !== "open" || vowel !== "normal";
                 if (needOverlay) {
-                    const sx = 265;
-                    const sy = 340;
-                    const sw = 310;
-                    const sh = 185;
+                    const softFace = this._getSoftFacePatchCanvas(sprite);
                     if (this.viewMode === "full") {
-                        const fullCropX = 497.0 + sx * (701.0 / 825.0);
-                        const fullCropY = 35.0 + (sy + 4.0) * (714.0 / 840.0);
-                        const fullCropW = sw * (701.0 / 825.0);
-                        const fullCropH = sh * (714.0 / 840.0);
-                        const dx = drawX + (fullCropX / 1696.0) * drawW;
-                        const dy = drawY + (fullCropY / 2528.0) * drawH;
-                        const dw = (fullCropW / 1696.0) * drawW;
-                        const dh = (fullCropH / 2528.0) * drawH;
-                        ctx.drawImage(sprite, sx, sy, sw, sh, dx, dy, dw, dh);
+                        const dx = drawX + (497.0 / 1696.0) * drawW;
+                        const dy = drawY + (35.0 / 2528.0) * drawH;
+                        const dw = (701.0 / 1696.0) * drawW;
+                        const dh = (714.0 / 2528.0) * drawH;
+                        ctx.drawImage(softFace, 0, 0, 825, 840, dx, dy, dw, dh);
                     } else {
-                        const dx = drawX + (sx / 825.0) * drawW;
-                        const dy = drawY + (sy / 840.0) * drawH;
-                        const dw = (sw / 825.0) * drawW;
-                        const dh = (sh / 840.0) * drawH;
-                        ctx.drawImage(sprite, sx, sy, sw, sh, dx, dy, dw, dh);
+                        ctx.drawImage(softFace, 0, 0, 825, 840, drawX, drawY, drawW, drawH);
                     }
                 }
             }

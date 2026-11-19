@@ -655,7 +655,28 @@ async def update_outfit_meta_api(outfit_id: str, payload: dict[str, Any] = Body(
         if g in {"school", "casual", "sport", "swimwear", "cosplay", "custom"}:
             cur["genre"] = g
     if "face_sync" in payload:
-        cur["face_sync"] = bool(payload["face_sync"])
+        want_sync = bool(payload["face_sync"])
+        if want_sync:
+            import asyncio
+            from PIL import Image as _PILImage
+            from scripts.build_outfit_assets import realign_outfit_dir
+
+            bust_p = os.path.join(target_dir, "bust.png")
+            need_realign = True
+            if os.path.isfile(bust_p):
+                try:
+                    with _PILImage.open(bust_p) as _bi:
+                        if _bi.size == (825, 840):
+                            need_realign = False
+                except Exception:
+                    pass
+            if need_realign:
+                aligned_ok = await asyncio.to_thread(realign_outfit_dir, safe_id)
+                cur["face_sync"] = bool(aligned_ok)
+            else:
+                cur["face_sync"] = True
+        else:
+            cur["face_sync"] = False
     cur["id"] = safe_id
 
     with open(meta_path, "w", encoding="utf-8") as f:

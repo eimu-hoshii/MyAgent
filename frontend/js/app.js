@@ -7,7 +7,7 @@
  * - 全5タブ統合設定モーダル・長期記憶CRUD・予定表＆スヌーズ管理
  */
 
-import { AvatarRenderer } from "./avatar.js?v=14";
+import { AvatarRenderer } from "./avatar.js?v=15";
 
 const EMOTION_LABELS = {
     normal: "通常 (NORMAL)",
@@ -3330,6 +3330,9 @@ class AgentController {
                     const res = await resp.json();
                     if (res.ok) {
                         this._renderAppearanceState(res, false);
+                        if ((this.currentConfig.active_outfit || "") === o.id) {
+                            this.avatar.setOutfit(o.id, false, true, !!(res.meta && res.meta.face_sync));
+                        }
                         if (statusEl) statusEl.textContent = `✅ 「${nameInp.value.trim()}」の設定を保存しました。`;
                         this._renderOutfitManageGrid();
                     }

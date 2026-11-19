@@ -268,36 +268,47 @@ def _cutout_pil_image(pil_img: Image.Image, session=None) -> tuple[np.ndarray, s
 
 def _align_to_canonical_face(rgba: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
     """
-    基準立ち絵（full_normal.png: 1696x2528）の顔領域（目〜口）へマルチスケールテンプレートマッチングを行い、
-    新衣装の顔位置・スケールを基準制服と完全一致させた (aligned_full_1696x2528, aligned_bust_825x840) を返す。
-    これにより別衣装でも基準制服の瞬き・6感情・あいうえお口パクを1pxズレなく流用できる。
+    基準バストアップ（normal_open_normal.png: 825x840）の目〜口領域テンプレートを用いて、
+    新衣装の顔位置・スケールを基準制服と1px誤差ゼロで一致させた
+    (aligned_full_1018x1517, aligned_bust_825x840) を返す。
+    帽子（サンタ帽・魔女帽・うさ耳等）で頭頂が高くなっても広範囲スケール探索で確実に捕捉する。
     """
     ref_full_path = os.path.join(CHAR_DIR, "full_normal.png")
-    if not os.path.isfile(ref_full_path):
+    ref_bust_path = os.path.join(CHAR_DIR, "normal_open_normal.png")
+    if not os.path.isfile(ref_full_path) or not os.path.isfile(ref_bust_path):
         return None
-    ref_rgba = np.array(Image.open(ref_full_path).convert("RGBA"))
-    ref_h, ref_w = ref_rgba.shape[:2]  # 2528, 1696
+    ref_full = Image.open(ref_full_path)
+    ref_w, ref_h = ref_full.size  # 実サイズ (1018, 1517)
 
-    # 基準立ち絵の顔テンプレート（眉〜口: x=715..985, y=315..495）
-    tx1, ty1, tx2, ty2 = 715, 315, 985, 495
-    tpl = cv2.cvtColor(ref_rgba[ty1:ty2, tx1:tx2, :3], cv2.COLOR_RGB2GRAY)
+    # 基準バストアップ (825x840) の正確な目〜口領域をテンプレートにする
+    ref_bust = np.array(Image.open(ref_bust_path).convert("RGBA"))
+    bx_t1, by_t1, bx_t2, by_t2 = 285, 345, 555, 515  # 幅270 x 高170
+    tpl = cv2.cvtColor(ref_bust[by_t1:by_t2, bx_t1:bx_t2, :3], cv2.COLOR_RGB2GRAY)
 
-    # 入力画像を基準高さ (2528) に概算リサイズして探索空間を作る
-    src_h, src_w = rgba.shape[:2]
+    # full_normal 上での基準目〜口座標（avatar.js の変換式を ref_w, ref_h へ適用）
+    sx_to_full = ref_w / 1696.0
+    sy_to_full = ref_h / 2528.0
+    target_fx = (497.0 + bx_t1 * (701.0 / 825.0)) * sx_to_full
+    target_fy = (35.0 + (by_t1 + 4.0) * (714.0 / 840.0)) * sy_to_full
+    target_fw = (bx_t2 - bx_t1) * (701.0 / 825.0) * sx_to_full
+    target_fh = (by_t2 - by_t1) * (714.0 / 840.0) * sy_to_full
+
+    # まず余白を除いたキャラ本体を基準高さ ref_h に正規化して探索空間を作る
+    cropped = _crop_to_content(rgba, pad=20)
+    src_h, src_w = cropped.shape[:2]
     base_scale = float(ref_h) / float(max(1, src_h))
     search_h = ref_h
     search_w = max(1, int(round(src_w * base_scale)))
-    resized_src = cv2.resize(rgba, (search_w, search_h), interpolation=cv2.INTER_LANCZOS4)
-    # 顔は必ず画像の上位40%にある
-    search_roi = cv2.cvtColor(resized_src[: int(search_h * 0.42), :, :3], cv2.COLOR_RGB2GRAY)
+    resized_src = cv2.resize(cropped, (search_w, search_h), interpolation=cv2.INTER_LANCZOS4)
+    search_roi = cv2.cvtColor(resized_src[: int(search_h * 0.45), :, :3], cv2.COLOR_RGB2GRAY)
 
     best_score = -1.0
     best_s = 1.0
     best_loc = (0, 0)
-    # 0.80x 〜 1.25x の範囲で顔スケールを探索
-    for s in np.linspace(0.80, 1.25, 19):
-        tw = max(16, int(round(tpl.shape[1] * s)))
-        th = max(16, int(round(tpl.shape[0] * s)))
+    # 基準顔幅 target_fw に対する相対倍率 s (0.70 〜 1.45) で粗探索
+    for s in np.linspace(0.70, 1.45, 31):
+        tw = max(16, int(round(target_fw * s)))
+        th = max(16, int(round(target_fh * s)))
         if th >= search_roi.shape[0] or tw >= search_roi.shape[1]:
             continue
         tpl_s = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
@@ -308,23 +319,36 @@ def _align_to_canonical_face(rgba: np.ndarray) -> tuple[np.ndarray, np.ndarray] 
             best_s = float(s)
             best_loc = max_loc
 
-    # 基準顔との相関が低すぎる場合は別構図とみなしてフォールバック
-    if best_score < 0.32:
+    # ベスト近傍の精密追い込み
+    for s in np.linspace(max(0.65, best_s - 0.03), min(1.50, best_s + 0.03), 13):
+        tw = max(16, int(round(target_fw * s)))
+        th = max(16, int(round(target_fh * s)))
+        if th >= search_roi.shape[0] or tw >= search_roi.shape[1]:
+            continue
+        tpl_s = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(search_roi, tpl_s, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        if max_val > best_score:
+            best_score = float(max_val)
+            best_s = float(s)
+            best_loc = max_loc
+
+    if best_score < 0.45:
+        print(f"[FaceSync] 基準顔との一致度が低いため通常モードへフォールバック (score={best_score:.3f})")
         return None
 
-    # 入力画像を基準顔スケールと完全一致するよう再スケーリング
+    # 入力画像を基準顔スケール (target_fw) と完全一致するようリサイズ
     final_scale = base_scale / best_s
     fw = max(1, int(round(src_w * final_scale)))
     fh = max(1, int(round(src_h * final_scale)))
-    scaled_rgba = cv2.resize(rgba, (fw, fh), interpolation=cv2.INTER_LANCZOS4)
+    scaled_rgba = cv2.resize(cropped, (fw, fh), interpolation=cv2.INTER_LANCZOS4)
 
-    # 検出された顔左上座標を最終スケールへ変換し、基準 (tx1, ty1) へ合わせるオフセットを算出
     det_x = int(round(best_loc[0] / best_s))
     det_y = int(round(best_loc[1] / best_s))
-    off_x = tx1 - det_x
-    off_y = ty1 - det_y
+    off_x = int(round(target_fx)) - det_x
+    off_y = int(round(target_fy)) - det_y
 
-    # 1696x2528 の基準キャンバスへ配置
+    # 基準 full_normal.png (1018x1517) と完全同一座標系キャンバスへ配置
     canvas_full = np.zeros((ref_h, ref_w, 4), dtype=np.uint8)
     dx1 = max(0, off_x)
     dy1 = max(0, off_y)
@@ -336,12 +360,46 @@ def _align_to_canonical_face(rgba: np.ndarray) -> tuple[np.ndarray, np.ndarray] 
         return None
     canvas_full[dy1 : dy1 + ch, dx1 : dx1 + cw] = scaled_rgba[sy1 : sy1 + ch, sx1 : sx1 + cw]
 
-    # 基準制服 (normal_open_normal.png: 825x840) と完全に同一座標 (x=497..1198, y=35..749 -> 825x840) でバストアップ切り出し
-    bx1, by1, bw, bh = 497, 35, 701, 714
-    bust_patch = canvas_full[by1 : by1 + bh, bx1 : bx1 + bw]
-    canvas_bust = cv2.resize(bust_patch, (825, 840), interpolation=cv2.INTER_LANCZOS4)
+    # 基準制服 (825x840) と完全同一座標で高解像度ソースから直接バストアップを切り出す（劣化ゼロ！）
+    # scaled_rgba 上でのバスト枠座標（full座標から off_x, off_y を引いてそのまま切り出す）
+    full_bx1 = 497.0 * sx_to_full
+    full_by1 = 35.0 * sy_to_full
+    full_bw = 701.0 * sx_to_full
+    full_bh = 714.0 * sy_to_full
+
+    # 元の高解像度 cropped から直接切り出すため、final_scale で逆算して画質劣化を完全防止
+    bust_scale_x = 825.0 / full_bw
+    bust_scale_y = 840.0 / full_bh
+    # アフィン変換で cropped -> 825x840 へ1パス直接サンプリング（2重リサイズなし＝超高精細！）
+    M = np.array(
+        [
+            [final_scale * bust_scale_x, 0.0, (off_x - full_bx1) * bust_scale_x],
+            [0.0, final_scale * bust_scale_y, (off_y - full_by1) * bust_scale_y],
+        ],
+        dtype=np.float32,
+    )
+    canvas_bust = cv2.warpAffine(
+        cropped, M, (825, 840), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
+    )
     print(f"[FaceSync] 基準顔へ自動アライメント成功 (score={best_score:.3f}, scale={final_scale:.3f}, offset=({off_x},{off_y}))")
     return canvas_full, canvas_bust
+
+
+def realign_outfit_dir(outfit_id: str) -> bool:
+    """既に登録済みの衣装フォルダ内の full.png を基準顔座標へ再アライメントし full.png / bust.png を更新する。"""
+    out_dir = os.path.join(OUTFITS_DIR, outfit_id)
+    full_path = os.path.join(out_dir, "full.png")
+    bust_path = os.path.join(out_dir, "bust.png")
+    if not os.path.isfile(full_path):
+        return False
+    rgba = np.array(Image.open(full_path).convert("RGBA"))
+    aligned = _align_to_canonical_face(rgba)
+    if aligned is None:
+        return False
+    aligned_full, aligned_bust = aligned
+    Image.fromarray(aligned_full, mode="RGBA").save(full_path, format="PNG")
+    Image.fromarray(aligned_bust, mode="RGBA").save(bust_path, format="PNG")
+    return True
 
 
 def build_outfit_from_pil(
