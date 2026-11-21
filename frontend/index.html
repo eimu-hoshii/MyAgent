@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=29" />
+    <link rel="stylesheet" href="/css/style.css?v=30" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -680,6 +680,13 @@
                             </select>
                         </label>
                     </div>
+                    <label class="modal-field">
+                        <span>🤖 無視ユーザー / Bot 除外リスト（カンマ区切り・大小文字区別なし）</span>
+                        <input type="text" id="cfg-live-ignored-users" placeholder="nightbot, streamelements, streamlabs, fossabot, moobot, sery_bot" />
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="cfg-live-ignore-cmds" checked /> Nightbot等の <code>!コマンド</code>（<code>!uptime</code> 等・投票/回答以外）をニアが拾わないよう無視する
+                    </label>
                 </div>
 
                 <!-- タブ4: ボイス詳細・読み上げ辞書・OBS演出 -->
@@ -1114,6 +1121,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=36"></script>
+    <script type="module" src="/js/app.js?v=37"></script>
 </body>
 </html>

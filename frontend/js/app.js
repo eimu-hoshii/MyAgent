@@ -1534,6 +1534,8 @@ class AgentController {
         // タブ3: 配信・企画・NG検閲
         setVal("cfg-youtube-id", c.youtube_live_id || "");
         setVal("cfg-twitch-ch", c.twitch_channel || "");
+        setVal("cfg-live-ignored-users", Array.isArray(c.live_ignored_users) ? c.live_ignored_users.join(", ") : "");
+        setChk("cfg-live-ignore-cmds", c.live_ignore_bot_commands !== false);
         setVal("cfg-live-poll", c.live_poll_interval_sec ?? 6);
         setVal("cfg-live-queue", c.live_queue_limit ?? 8);
         setVal("cfg-silence-sec", c.silence_timeout_sec ?? 90);
@@ -1742,6 +1744,8 @@ class AgentController {
             clipboard_watch_enabled: chk("cfg-clipboard-watch"),
             youtube_live_id: val("cfg-youtube-id"),
             twitch_channel: val("cfg-twitch-ch"),
+            live_ignored_users: val("cfg-live-ignored-users"),
+            live_ignore_bot_commands: chk("cfg-live-ignore-cmds"),
             live_poll_interval_sec: parseInt(val("cfg-live-poll"), 10) || 6,
             live_queue_limit: parseInt(val("cfg-live-queue"), 10) || 8,
             silence_timeout_sec: parseInt(val("cfg-silence-sec"), 10) || 90,

@@ -371,6 +371,20 @@ class AgentConfig:
     talk_deck_auto_advance: bool = False  # 無言防止時に画面上の配信テーマ・話題デッキを自動で次へ切り替えるか
     ng_words: list[str] = field(default_factory=lambda: list(DEFAULT_NG_WORDS))
     ng_action: str = "deflect"  # "ignore" (完全無視) | "deflect" (クールにあしらう)
+    live_ignored_users: list[str] = field(
+        default_factory=lambda: [
+            "nightbot",
+            "streamelements",
+            "streamlabs",
+            "fossabot",
+            "moobot",
+            "sery_bot",
+            "wizebot",
+            "soundalerts",
+            "commanderroot",
+        ]
+    )  # 配信チャットで完全無視するBot・荒らしユーザー名リスト（大小文字区別なし）
+    live_ignore_bot_commands: bool = True  # Nightbot等の !コマンド（!uptime 等）をニアが拾わないよう無視
     obs_motion_intensity: float = 1.0  # 感情別モーション強度 (0.0〜2.0)
     obs_subtitle_scale: float = 1.0  # 字幕サイズ倍率 (0.7〜1.5)
     obs_se_enabled: bool = True  # スパチャ・アラート時のSE効果音
@@ -641,6 +655,7 @@ class AgentConfig:
             "weather_bg_effect_enabled",
             "interaction_enabled",
             "affection_enabled",
+            "live_ignore_bot_commands",
         ]
         for bf in bool_fields:
             if bf in data and data[bf] is not None:
@@ -709,6 +724,7 @@ class AgentConfig:
             "rag_dirs",
             "vtuber_private_blocklist",
             "active_accessories",
+            "live_ignored_users",
         ):
             if str_list_field in data and data[str_list_field] is not None:
                 raw_val = data[str_list_field]

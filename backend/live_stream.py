@@ -72,6 +72,16 @@ class LiveStreamConnector:
         if not clean_text:
             return
 
+        # 無視ユーザー / モデレーションBot（Nightbot, StreamElements等）のコメントを完全除外
+        norm_user = (user_name or "").strip().lstrip("@").lower()
+        ignored_set = {
+            str(u).strip().lstrip("@").lower()
+            for u in (config.live_ignored_users or [])
+            if str(u).strip()
+        }
+        if norm_user and norm_user in ignored_set:
+            return
+
         # 投票コマンド（!1 等）なら即集計のみ実施し、連投でトークキューを埋めない選択も許容
         if not is_special and self.on_raw_comment is not None:
             try:
@@ -80,6 +90,10 @@ class LiveStreamConnector:
                     return
             except Exception:
                 pass
+
+        # Nightbot等の !コマンド（!uptime, !commands, !song 等）をニアが拾わないよう無視
+        if not is_special and config.live_ignore_bot_commands and clean_text.startswith(("!", "！")):
+            return
 
         if is_special:
             meta = {"amount": special_amount or "¥1,000", "platform": platform, **(extra_meta or {})}
