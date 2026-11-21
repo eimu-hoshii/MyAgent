@@ -11,13 +11,14 @@ httpx>=0.27.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
 
-# --- 画像処理・衣装クロマキー透過・顔自動位置合わせ・AI透過 ---
+# --- 画像処理・衣装クロマキー透過・顔自動位置合わせ ---
 pillow>=10.3.0
-numpy>=1.26.0,<2.0.0
-opencv-python>=4.9.0
-scipy>=1.13.0
-rembg>=2.0.50
-onnxruntime>=1.18.0
+numpy>=1.26.0
+opencv-python>=4.10.0
+scipy>=1.14.0
+# ※白背景のAI自動透過 (isnet-anime) を使う場合のみ追加導入（クロマキー緑 #00FF00 透過は上記のみで動作）:
+# rembg>=2.0.50
+# onnxruntime>=1.18.0
 
 # --- 音声合成(TTS)・音声認識(STT)・システム監視 ---
 edge-tts>=6.1.12
