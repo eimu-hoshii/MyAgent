@@ -1535,7 +1535,7 @@ class AgentController {
         setVal("cfg-youtube-id", c.youtube_live_id || "");
         setVal("cfg-twitch-ch", c.twitch_channel || "");
         setVal("cfg-live-ignored-users", Array.isArray(c.live_ignored_users) ? c.live_ignored_users.join(", ") : "");
-        setChk("cfg-live-ignore-cmds", c.live_ignore_bot_commands !== false);
+        setCheck("cfg-live-ignore-cmds", c.live_ignore_bot_commands !== false);
         setVal("cfg-live-poll", c.live_poll_interval_sec ?? 6);
         setVal("cfg-live-queue", c.live_queue_limit ?? 8);
         setVal("cfg-silence-sec", c.silence_timeout_sec ?? 90);
