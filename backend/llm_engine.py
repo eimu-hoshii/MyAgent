@@ -1195,11 +1195,17 @@ class LLMEngine:
                         await on_status_Callback({"type": "news_overlay", "cards": cards})
 
             messages.append({"role": "assistant", "content": raw_text})
+            vtuber_news_hint = (
+                "また、VTuber配信モードでは複数記事を全部羅列せず、一番面白そうな『1つの記事だけ』を選んでツンデレらしい感想とリスナーへの問いかけをテンポよく喋ってください。"
+                if (config.mode == "vtuber" and tool_name.strip().lower() == "web_search")
+                else ""
+            )
             next_user_msg: dict[str, Any] = {
                 "role": "user",
                 "content": (
                     f"【ツール `{tool_name}` の実行結果】\n{observation}\n\n"
                     "上記の検索・実行結果を踏まえ、特に日付（`[最新ニュース (YYYY-MM-DD)]` 等）が質問の対象日と一致しているか厳密に確認してください。"
+                    f"{vtuber_news_hint}"
                     "もし検索結果のURL本文をさらに詳しく読む必要があれば `fetch_webpage` を呼び出し、十分な情報が揃っていれば `tool_call` を `null` にして最終報告をJSON形式で出力してください。"
                 ),
             }

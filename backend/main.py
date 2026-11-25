@@ -349,7 +349,25 @@ async def control_pomodoro(payload: dict[str, Any] = Body(...)) -> dict[str, Any
 @app.post("/api/talk_deck/next")
 async def trigger_talk_deck_api() -> dict[str, Any]:
     """VTuber話題デッキから次のトーク企画を即時発動する。"""
-    return await orchestrator.trigger_next_talk_deck()
+    return await orchestrator.trigger_next_talk_deck(advance_theme=True)
+
+
+@app.post("/api/talk_deck/refresh_web")
+async def refresh_talk_deck_web_api(payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    """Web検索＋AI生成で最新の面白いお題を話題デッキへ自動補充する。"""
+    append = bool(payload.get("append", True))
+    return await orchestrator.refresh_talk_deck_from_web(append=append)
+
+
+@app.post("/api/talk_deck/load_default50")
+async def load_default_talk_deck_50_api() -> dict[str, Any]:
+    """標準搭載のおすすめ配信お題50選を話題デッキへ一括セットする。"""
+    from backend.config import DEFAULT_TALK_DECK
+
+    config.talk_deck_themes = list(DEFAULT_TALK_DECK)
+    config.save_persona_settings()
+    await orchestrator.broadcast({"type": "config_updated", "config": orchestrator.get_public_config()})
+    return {"ok": True, "total_count": len(config.talk_deck_themes), "themes": config.talk_deck_themes}
 
 
 @app.post("/api/demo_stream")

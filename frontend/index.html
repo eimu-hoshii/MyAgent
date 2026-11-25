@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=30" />
+    <link rel="stylesheet" href="/css/style.css?v=31" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -294,6 +294,11 @@
                 <div id="obs-poll-overlay" class="obs-overlay-card obs-poll-card hidden"></div>
                 <div id="obs-mailbag-card" class="obs-overlay-card obs-mailbag-card hidden"></div>
                 <div id="obs-karaoke-bar" class="obs-overlay-card obs-karaoke-card hidden"></div>
+                <!-- OBS専用: ニアの直近発話履歴ログ（途中参加の視聴者でも会話の流れが分かる） -->
+                <div id="obs-speech-log" class="obs-speech-log hidden">
+                    <div class="obs-speech-log-head">💬 NIA TALK LOG</div>
+                    <div id="obs-speech-log-list" class="obs-speech-log-list"></div>
+                </div>
                 <!-- AIエージェント用 コマンド実行 HITL 承認バナー（OBSモード時は非表示） -->
                 <div id="approval-banner-container" class="approval-banner-container obs-hide hidden"></div>
                 <!-- マスコットモード専用ホバーミニツールバー（サイズ変更・上下移動・全身切替・会話） -->
@@ -652,20 +657,30 @@
                             </div>
                         </label>
                         <label class="modal-field">
-                            <span>無言防止 (Silence Breaker) 発動秒数</span>
-                            <input type="number" id="cfg-silence-sec" min="10" max="600" value="90" />
+                            <span>無言防止・1人喋り間隔 (秒) / 話題切替間隔 (分: 0=手動)</span>
+                            <div class="inline-row">
+                                <input type="number" id="cfg-silence-sec" min="10" max="600" value="120" title="無言防止・1人喋り間隔(秒)" />
+                                <input type="number" id="cfg-talk-rotate-min" min="0" max="1440" value="120" title="話題丸ごと自動切替間隔(分: 120=2時間)" />
+                            </div>
                         </label>
                     </div>
                     <div class="checkbox-grid">
-                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-news" checked /> 話題デッキ発動時に自動で最新ニュースをWeb検索して紹介する</label>
-                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-advance" /> 無言防止タイマー時に現在の話題テーマ・OBSシーンも自動で次へ切り替える</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-news" checked /> ニュース系お題のとき自動でWeb検索して1件厳選紹介する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-advance" /> 無言防止のたびに毎回すぐ話題も切り替える（通常OFF推奨）</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-viewer-profile" checked /> 常連リスナー記憶（初見/常連・過去の会話特徴を自動記憶）</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-obs-topic-telop" checked /> OBS配信画面に「現在の配信テーマ」サブテロップを表示</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-speech-log" checked /> OBS配信画面に「ニアの直近発話履歴ログ（直近4件）」を表示</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-obs-telop-pomo" checked /> OBSサブテロップにポモドーロ残り時間も表示する</label>
                     </div>
                     <label class="modal-field">
-                        <span>🎲 配信企画・話題デッキリスト（1行に1テーマ記述）</span>
-                        <textarea id="cfg-talk-deck" rows="4"></textarea>
+                        <div class="inline-row" style="justify-content: space-between; align-items: center;">
+                            <span>🎲 配信企画・話題デッキリスト（1行に1テーマ記述）</span>
+                            <div class="inline-row" style="gap: 6px; width: auto;">
+                                <button type="button" id="btn-load-default-deck" class="tiny-btn">🎲 おすすめ50お題をセット</button>
+                                <button type="button" id="btn-refresh-deck-web" class="tiny-btn primary">🌐 Web検索でAI自動補充</button>
+                            </div>
+                        </div>
+                        <textarea id="cfg-talk-deck" rows="5"></textarea>
                     </label>
                     <div class="settings-grid-2">
                         <label class="modal-field">
@@ -1121,6 +1136,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=38"></script>
+    <script type="module" src="/js/app.js?v=39"></script>
 </body>
 </html>

@@ -123,6 +123,8 @@ class AgentOrchestrator:
         self.last_weather_bg_check: float = 0.0
         self.last_time_outfit_period: str = ""
         self.last_outfit_random_time: float = time.time()
+        self.last_topic_rotate_time: float = time.time()
+        self._recent_talk_topics: list[str] = []
 
         self._worker_task: asyncio.Task[Any] | None = None
         self._proactive_task: asyncio.Task[Any] | None = None
@@ -592,35 +594,48 @@ class AgentOrchestrator:
         return True
 
     async def trigger_next_talk_deck(self, advance_theme: bool = True) -> dict[str, Any]:
-        """話題デッキ（トークテーマ）または未読お便りコーナーを取り出して発動する（VTuberモード専用）。"""
+        """話題デッキ（トークテーマ）または同一テーマの深掘り1人喋りを発動する（VTuberモード専用）。"""
         if config.mode != "vtuber":
             return {"ok": False, "error": "話題デッキはVTuberモード専用です"}
 
-        themes = config.talk_deck_themes or [
-            "最新ニュースや気になる話題をリスナーに紹介する",
+        themes = [t.strip() for t in (config.talk_deck_themes or []) if str(t).strip()] or [
+            "最新ニュースや気になる話題を検索して1件だけリスナーに紹介する",
             "視聴者に今何をしているか質問を振る",
         ]
         if advance_theme:
-            theme = themes[self.talk_deck_index % len(themes)]
+            # 直近で使った話題と被らないようランダム選択
+            cur_topic = (config.stream_topic or "").strip()
+            avoid = set(self._recent_talk_topics[-min(10, max(1, len(themes) - 1)) :])
+            if cur_topic:
+                avoid.add(cur_topic)
+            candidates = [t for t in themes if t not in avoid] or themes
+            theme = random.choice(candidates)
+            self._recent_talk_topics.append(theme)
+            self._recent_talk_topics = self._recent_talk_topics[-25:]
             self.talk_deck_index += 1
+            self.last_topic_rotate_time = time.time()
             await self.set_stream_topic(theme)
 
             if config.obs_ws_enabled:
-                scene_key = "news" if ("ニュース" in theme or "話題" in theme) else "talk"
+                scene_key = "news" if ("ニュース" in theme or "トレンド" in theme) else "talk"
                 asyncio.create_task(obs_ws_client.switch_scene(scene_key))
 
-            prompt = f"【配信企画・話題デッキ発動】テーマ: 「{theme}」"
-            if config.talk_deck_auto_news and ("ニュース" in theme or "話題" in theme):
-                prompt += " ※まず `web_search` ツールで最新ニュースを検索してから、面白そうなトピックをリスナーに紹介してください。"
+            prompt = f"【配信テーマ切替・新トピック開始】テーマ: 「{theme}」"
+            if config.talk_deck_auto_news and ("ニュース" in theme or "トレンド" in theme):
+                prompt += (
+                    " ※まず `web_search` ツールで最新ニュースを検索し、ヒットした記事の中から"
+                    "一番面白そうな『1つの記事だけ』を選んで紹介＆ツンデレらしい感想を語ってください（複数羅列しない）。"
+                )
             else:
-                prompt += " ※このテーマに沿って、配信者らしく視聴者に楽しく語りかけてください。"
+                prompt += " ※『そろそろ次の話題にいくわよ』など自然な切り出しで、この新テーマについて視聴者へ楽しく語りかけてください。"
         else:
             current_topic = (config.stream_topic or "").strip()
-            theme = current_topic or themes[self.talk_deck_index % len(themes)]
+            theme = current_topic or random.choice(themes)
             if current_topic:
                 prompt = (
-                    f"【無言防止・自然な繋ぎトーク】現在の配信テーマ「{current_topic}」を維持したまま、"
-                    "コメントの合い間にリスナーへ軽く問いかけや雑談を1〜2文で投げかけてください（テーマ名は変えない）。"
+                    f"【無言防止・1人喋り継続】現在の配信テーマ「{current_topic}」を維持したまま、"
+                    "直前の自分の発言とは『違う切り口・具体例・別の視点・リスナーへの質問』で1〜2文トークを広げてください。"
+                    "同じ内容や同じ締めの言葉を繰り返さず、ニュース話題なら別の切り口の感想やリスナーへの問いかけにしてください。"
                 )
             else:
                 prompt = (
@@ -638,6 +653,48 @@ class AgentOrchestrator:
             )
         )
         return {"ok": True, "theme": theme, "theme_advanced": advance_theme}
+
+    async def refresh_talk_deck_from_web(self, append: bool = True) -> dict[str, Any]:
+        """Web検索＋AI生成で面白い雑談お題・最新トレンド話題を自動収集し、話題デッキへ補充する。"""
+        from backend.tools import tool_web_search
+
+        try:
+            obs1, obs2 = await asyncio.gather(
+                tool_web_search("配信 雑談 お題 面白い トークテーマ 質問ネタ"),
+                tool_web_search("今日 話題 トレンド 面白い ニュース 雑学"),
+            )
+            raw_md = await llm_engine.generate_markdown(
+                system_prompt=(
+                    "あなたは人気VTuber配信の放送作家です。与えられたWeb検索結果やトレンドを参考に、"
+                    "視聴者と盛り上がるユニークな配信トークお題を15個作成してください。"
+                    "出力は『1行に1お題』の箇条書き（番号や記号なし、35文字以内の簡潔な日本語テーマのみ）にしてください。"
+                    "前置き・解説・まとめは一切書かないこと。"
+                ),
+                user_prompt=f"【参考Web検索結果1】\n{obs1[:2000]}\n\n【参考Web検索結果2】\n{obs2[:2000]}\n\nこれらをヒントに面白い配信お題を15個だけ1行ずつ出力してください。",
+            )
+            new_topics: list[str] = []
+            for line in (raw_md or "").splitlines():
+                cleaned = re.sub(r"^[\s\-*・●◆▶\d.．、()（）]+", "", line.strip()).strip()
+                if 6 <= len(cleaned) <= 65 and not cleaned.startswith(("#", "```", "以下", "はい")):
+                    new_topics.append(cleaned)
+            # LLM出力が少なすぎた場合は検索結果の見出しからも安全に補完
+            if not new_topics:
+                return {"ok": False, "error": "Web検索結果から有効なお題を抽出できませんでした。"}
+
+            base = list(config.talk_deck_themes or []) if append else []
+            seen = set(base)
+            added: list[str] = []
+            for t in new_topics:
+                if t not in seen:
+                    base.append(t)
+                    seen.add(t)
+                    added.append(t)
+            config.talk_deck_themes = base[:120]
+            config.save_persona_settings()
+            await self.broadcast({"type": "config_updated", "config": self.get_public_config()})
+            return {"ok": True, "added_count": len(added), "total_count": len(config.talk_deck_themes), "added": added}
+        except Exception as exc:
+            return {"ok": False, "error": f"お題Web自動補充エラー: {exc}"}
 
     async def set_stream_topic(self, topic: str) -> None:
         """現在の配信テーマを更新し、OBSテロップ＆配信アーカイブハイライトへ反映する。"""
@@ -1178,7 +1235,11 @@ class AgentOrchestrator:
                 and len(self.active_connections) > 0
             ):
                 idle_sec = now - self.last_interaction_time
-                if idle_sec >= config.silence_timeout_sec:
+                rotate_min = int(getattr(config, "talk_topic_rotate_min", 120) or 0)
+                if rotate_min > 0 and (now - self.last_topic_rotate_time) >= float(rotate_min * 60):
+                    # 一定時間（例: 2時間）経過したら話題を丸ごと次へ自動切替
+                    await self.trigger_next_talk_deck(advance_theme=True)
+                elif idle_sec >= config.silence_timeout_sec:
                     await self.trigger_next_talk_deck(advance_theme=config.talk_deck_auto_advance)
 
 

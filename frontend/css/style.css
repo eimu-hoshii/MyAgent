@@ -2497,6 +2497,71 @@ body.mode-vtuber #btn-pointer-mode {
     display: none !important;
 }
 
+/* OBS専用：ニアの直近発話履歴ログ（通常コンソールでは非表示、?mode=obs のみ表示） */
+.obs-speech-log {
+    display: none;
+}
+
+body.obs-mode .obs-speech-log:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    position: absolute;
+    left: 16px;
+    top: 72px;
+    width: min(390px, 38vw);
+    max-height: 360px;
+    padding: 9px 11px;
+    border-radius: 12px;
+    background: rgba(10, 15, 30, 0.72);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(6px);
+    z-index: 25;
+    pointer-events: none;
+}
+
+.obs-speech-log-head {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #7dd3fc;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+    padding-bottom: 4px;
+}
+
+.obs-speech-log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.obs-speech-log-item {
+    font-size: 0.78rem;
+    line-height: 1.38;
+    color: #f1f5f9;
+    background: rgba(15, 23, 42, 0.65);
+    border-left: 3px solid #f472b6;
+    border-radius: 6px;
+    padding: 5px 8px;
+}
+
+.obs-speech-log-item .obs-log-time {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: #94a3b8;
+    margin-right: 5px;
+}
+
+.obs-speech-log-item .obs-log-sub {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.7rem;
+    color: #93c5fd;
+}
+
 .outfit-modal-dialog {
     max-width: 720px;
     width: 94vw;

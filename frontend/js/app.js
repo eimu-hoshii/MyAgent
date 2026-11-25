@@ -623,6 +623,55 @@ class AgentController {
                 } catch (_) {}
             });
         }
+        const loadDeck50Btn = document.getElementById("btn-load-default-deck");
+        if (loadDeck50Btn) {
+            loadDeck50Btn.addEventListener("click", async () => {
+                loadDeck50Btn.disabled = true;
+                try {
+                    const resp = await fetch("/api/talk_deck/load_default50", { method: "POST" });
+                    const res = await resp.json();
+                    if (res.ok && Array.isArray(res.themes)) {
+                        const ta = document.getElementById("cfg-talk-deck");
+                        if (ta) ta.value = res.themes.join("\n");
+                        loadDeck50Btn.textContent = `✅ ${res.total_count}件セット済`;
+                        setTimeout(() => { loadDeck50Btn.textContent = "🎲 おすすめ50お題をセット"; }, 2000);
+                    }
+                } catch (_) {} finally {
+                    loadDeck50Btn.disabled = false;
+                }
+            });
+        }
+        const refreshDeckWebBtn = document.getElementById("btn-refresh-deck-web");
+        if (refreshDeckWebBtn) {
+            refreshDeckWebBtn.addEventListener("click", async () => {
+                refreshDeckWebBtn.disabled = true;
+                const prev = refreshDeckWebBtn.textContent;
+                refreshDeckWebBtn.textContent = "⏳ Web検索＆AI生成中...";
+                try {
+                    const resp = await fetch("/api/talk_deck/refresh_web", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ append: true }),
+                    });
+                    const res = await resp.json();
+                    if (res.ok) {
+                        const ta = document.getElementById("cfg-talk-deck");
+                        if (ta && Array.isArray(this.currentConfig.talk_deck_themes)) {
+                            ta.value = this.currentConfig.talk_deck_themes.join("\n");
+                        }
+                        refreshDeckWebBtn.textContent = `✅ +${res.added_count}件補充 (計${res.total_count})`;
+                        setTimeout(() => { refreshDeckWebBtn.textContent = prev; }, 2600);
+                    } else {
+                        refreshDeckWebBtn.textContent = "❌ 取得失敗";
+                        setTimeout(() => { refreshDeckWebBtn.textContent = prev; }, 2200);
+                    }
+                } catch (_) {
+                    refreshDeckWebBtn.textContent = prev;
+                } finally {
+                    refreshDeckWebBtn.disabled = false;
+                }
+            });
+        }
         this._setupOutfitUploadModal();
 
         // OBS配信テーマ更新 & 常連リスナー記憶全消去
@@ -1538,9 +1587,11 @@ class AgentController {
         setCheck("cfg-live-ignore-cmds", c.live_ignore_bot_commands !== false);
         setVal("cfg-live-poll", c.live_poll_interval_sec ?? 6);
         setVal("cfg-live-queue", c.live_queue_limit ?? 8);
-        setVal("cfg-silence-sec", c.silence_timeout_sec ?? 90);
+        setVal("cfg-silence-sec", c.silence_timeout_sec ?? 120);
+        setVal("cfg-talk-rotate-min", c.talk_topic_rotate_min ?? 120);
         setCheck("cfg-talk-auto-news", c.talk_deck_auto_news ?? true);
         setCheck("cfg-talk-auto-advance", !!c.talk_deck_auto_advance);
+        setCheck("cfg-obs-speech-log", c.obs_speech_log_enabled !== false);
         setVal("cfg-talk-deck", (c.talk_deck_themes || []).join("\n"));
         setVal("cfg-ng-words", (c.ng_words || []).join(", "));
         setVal("cfg-ng-action", c.ng_action || "deflect");
@@ -1748,9 +1799,11 @@ class AgentController {
             live_ignore_bot_commands: chk("cfg-live-ignore-cmds"),
             live_poll_interval_sec: parseInt(val("cfg-live-poll"), 10) || 6,
             live_queue_limit: parseInt(val("cfg-live-queue"), 10) || 8,
-            silence_timeout_sec: parseInt(val("cfg-silence-sec"), 10) || 90,
+            silence_timeout_sec: parseInt(val("cfg-silence-sec"), 10) || 120,
+            talk_topic_rotate_min: Math.max(0, parseInt(val("cfg-talk-rotate-min"), 10) || 0),
             talk_deck_auto_news: chk("cfg-talk-auto-news"),
             talk_deck_auto_advance: chk("cfg-talk-auto-advance"),
+            obs_speech_log_enabled: chk("cfg-obs-speech-log"),
             talk_deck_themes: val("cfg-talk-deck")
                 .split(/\r?\n/)
                 .map((s) => s.trim())
@@ -2112,6 +2165,7 @@ class AgentController {
                     this.speechStreamQueue.fullSubtitleShown = true;
                 }
                 this._showSubtitle(data.speech, data.emotion, null, speechSub);
+                this._appendObsSpeechLog(data.speech, speechSub);
                 this._appendThoughtItem(
                     `[判断根拠 (${data.emotion})${data.self_reviewed ? " / 自己レビュー済" : ""}] ${data.thought}`,
                     "thought"
@@ -2829,6 +2883,7 @@ class AgentController {
         this.currentConfig = cfg;
 
         document.body.classList.toggle("mode-vtuber", normalizedMode === "vtuber");
+        this._renderObsSpeechLogVisibility();
         // VTuberモード時はふれあいOFF（位置移動モード固定）、Agentモード時はボタン状態へ復帰
         const pointerModeBtn = document.getElementById("btn-pointer-mode");
         if (normalizedMode === "vtuber") {
@@ -3994,16 +4049,59 @@ class AgentController {
         }
     }
 
+    _renderObsSpeechLogVisibility() {
+        const box = document.getElementById("obs-speech-log");
+        if (!box) return;
+        const enabled = this.isObsMode && this.currentConfig.obs_speech_log_enabled !== false;
+        const list = document.getElementById("obs-speech-log-list");
+        const hasItems = !!(list && list.children.length > 0);
+        box.classList.toggle("hidden", !(enabled && hasItems));
+    }
+
+    _appendObsSpeechLog(speech, speechSub = "", timeStr = "") {
+        const list = document.getElementById("obs-speech-log-list");
+        if (!list || !speech || !String(speech).trim()) return;
+        const nowStr =
+            timeStr ||
+            new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+        const item = document.createElement("div");
+        item.className = "obs-speech-log-item";
+
+        const tSpan = document.createElement("span");
+        tSpan.className = "obs-log-time";
+        tSpan.textContent = nowStr;
+        item.appendChild(tSpan);
+
+        const bodySpan = document.createElement("span");
+        bodySpan.textContent = String(speech).trim();
+        item.appendChild(bodySpan);
+
+        if (speechSub && String(speechSub).trim() && this.currentConfig.bilingual_enabled) {
+            const subSpan = document.createElement("span");
+            subSpan.className = "obs-log-sub";
+            subSpan.textContent = String(speechSub).trim();
+            item.appendChild(subSpan);
+        }
+        list.appendChild(item);
+        while (list.children.length > 4) {
+            list.removeChild(list.firstChild);
+        }
+        this._renderObsSpeechLogVisibility();
+    }
+
     _renderInitialHistory(history, options = {}) {
         const { showSubtitle = true, appendThoughts = true } = options;
         const container = document.getElementById("chat-feed");
         if (!container) return;
         container.innerHTML = "";
+        const obsList = document.getElementById("obs-speech-log-list");
+        if (obsList) obsList.innerHTML = "";
         if (!history || history.length === 0) {
             if (showSubtitle) {
                 const def = this._getPersonaDefaultSpeech();
                 this._showSubtitle(def.speech, def.emotion);
             }
+            this._renderObsSpeechLogVisibility();
             return;
         }
         for (const h of history) {
@@ -4024,6 +4122,14 @@ class AgentController {
             if (appendThoughts && h.thought) {
                 this._appendThoughtItem(`[${h.emotion}] ${h.thought}`, "thought");
             }
+        }
+        // OBS透過画面用：直近4件の発話履歴を初期復元
+        const recentSpeeches = history.filter((h) => h && h.agent_speech).slice(-4);
+        for (const h of recentSpeeches) {
+            const ts = h.created_at
+                ? new Date(h.created_at * 1000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
+                : "";
+            this._appendObsSpeechLog(h.agent_speech, h.speech_sub || "", ts);
         }
         if (showSubtitle) {
             const last = history[history.length - 1];
