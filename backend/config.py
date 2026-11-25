@@ -743,7 +743,7 @@ class AgentConfig:
             ("audio_cache_max_age_min", 1, 1440),
             ("obs_ws_port", 1, 65535),
             ("vtuber_screen_watch_interval_sec", 5, 300),
-            ("outfit_interval_min", 5, 720),
+            ("outfit_interval_min", 1, 720),
             ("talk_topic_rotate_min", 0, 1440),
         ]
         for fname, vmin, vmax in int_fields:

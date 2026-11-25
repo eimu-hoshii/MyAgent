@@ -161,7 +161,7 @@ class AgentOrchestrator:
         await self.broadcast(payload)
         return payload
 
-    async def pick_random_outfit(self, exclude_current: bool = True) -> dict[str, Any]:
+    async def pick_random_outfit(self, exclude_current: bool = True, reason: str = "manual") -> dict[str, Any]:
         """利用可能な衣装一覧からランダムに1着選んで即時着替え・全クライアント配信する。"""
         avail = [o for o in list_available_outfits() if o.get("available")]
         if not avail:
@@ -172,6 +172,10 @@ class AgentOrchestrator:
         config.active_outfit = chosen["id"]
         self.last_outfit_random_time = time.time()
         config.save_persona_settings()
+        print(
+            f"[Outfit] 着替え実行 ({reason}): {cur} -> {chosen['id']} ({chosen.get('name', chosen['id'])})"
+            + (f" / 次回: {config.outfit_interval_min}分後" if reason == "interval" else "")
+        )
         state = await self.broadcast_appearance_state()
         await self.broadcast({"type": "config_updated", "config": self.get_public_config()})
         return {"ok": True, "chosen": chosen, **state}
@@ -237,10 +241,10 @@ class AgentOrchestrator:
         oam = str(config.outfit_auto_mode or "time_only").strip().lower()
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         if oam in ("startup", "random"):
-            await self.pick_random_outfit(exclude_current=True)
+            await self.pick_random_outfit(exclude_current=True, reason="startup")
         elif oam == "daily" and config.outfit_last_daily_date != today_str:
             config.outfit_last_daily_date = today_str
-            await self.pick_random_outfit(exclude_current=True)
+            await self.pick_random_outfit(exclude_current=True, reason="daily")
 
     def sync_voice_listener(self) -> None:
         """設定に応じてローカル VAD + Whisper マイク待機スレッドを開始または停止する。"""
@@ -938,320 +942,327 @@ class AgentOrchestrator:
         """
         while True:
             await asyncio.sleep(2.0)
-            now = time.time()
+            try:
+                await self._proactive_monitor_tick()
+            except Exception as exc:
+                print(f"[Orchestrator] 監視ループ例外（継続稼働）: {exc}")
 
-            # 外部エンジン稼働状態チェック（20秒ごと）
-            if now - self.last_engine_check_time >= 20.0:
-                self.last_engine_check_time = now
-                try:
-                    await self.refresh_engine_status()
-                except Exception as exc:
-                    print(f"[Orchestrator] エンジン状態確認エラー: {exc}")
+    async def _proactive_monitor_tick(self) -> None:
+        """監視ループの1ティック処理（例外時は呼び出し元で捕捉し監視を継続する）。"""
+        now = time.time()
 
-            # 音声キャッシュ自動クリーンアップ（5分ごと）
-            if now - self.last_cache_cleanup_time >= 300.0:
-                self.last_cache_cleanup_time = now
-                tts_engine.cleanup_old_cache()
+        # 外部エンジン稼働状態チェック（20秒ごと）
+        if now - self.last_engine_check_time >= 20.0:
+            self.last_engine_check_time = now
+            try:
+                await self.refresh_engine_status()
+            except Exception as exc:
+                print(f"[Orchestrator] エンジン状態確認エラー: {exc}")
 
-            # 自動着せ替え制御（off / time_only / daily / startup / interval / random）
-            oam = str(config.outfit_auto_mode or "time_only").strip().lower()
-            if oam == "time_only" and config.auto_outfit_by_time:
-                h_now = datetime.datetime.now().hour
-                cur_band = "sleep_time" if (h_now >= 23 or h_now < 6) else "awake_time"
-                if self.last_time_outfit_period != cur_band:
-                    self.last_time_outfit_period = cur_band
-                    avail_ids = {o["id"] for o in list_available_outfits() if o.get("available")}
-                    if cur_band == "sleep_time" and config.active_outfit == "default" and "pajama" in avail_ids:
-                        config.active_outfit = "pajama"
-                        config.save_persona_settings()
-                        await self.broadcast_appearance_state()
-                    elif cur_band == "awake_time" and config.active_outfit == "pajama":
-                        config.active_outfit = "default"
-                        config.save_persona_settings()
-                        await self.broadcast_appearance_state()
-            elif oam == "daily":
-                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-                if config.outfit_last_daily_date != today_str:
-                    config.outfit_last_daily_date = today_str
-                    await self.pick_random_outfit(exclude_current=True)
-            elif oam in ("interval", "random"):
-                interval_sec = max(300.0, float(int(config.outfit_interval_min or 60) * 60))
-                if (now - self.last_outfit_random_time) >= interval_sec:
-                    await self.pick_random_outfit(exclude_current=True)
+        # 音声キャッシュ自動クリーンアップ（5分ごと）
+        if now - self.last_cache_cleanup_time >= 300.0:
+            self.last_cache_cleanup_time = now
+            tts_engine.cleanup_old_cache()
 
-            # 天気連動背景演出の定期チェック（30分ごと）
-            if config.weather_bg_effect_enabled and (now - self.last_weather_bg_check) >= 1800.0:
-                self.last_weather_bg_check = now
-                try:
-                    w_txt = await tool_get_weather("亀岡")
-                    first_day = w_txt.splitlines()[1] if len(w_txt.splitlines()) > 1 else w_txt
-                    new_kind = "rain" if ("雨" in first_day or "雪" in first_day) else ("cloudy" if "くもり" in first_day else "clear")
-                    if new_kind != self.current_weather_kind:
-                        self.current_weather_kind = new_kind
-                        await self.broadcast_appearance_state()
-                except Exception:
-                    pass
+        # 自動着せ替え制御（off / time_only / daily / startup / interval / random）
+        oam = str(config.outfit_auto_mode or "time_only").strip().lower()
+        if oam == "time_only" and config.auto_outfit_by_time:
+            h_now = datetime.datetime.now().hour
+            cur_band = "sleep_time" if (h_now >= 23 or h_now < 6) else "awake_time"
+            if self.last_time_outfit_period != cur_band:
+                self.last_time_outfit_period = cur_band
+                avail_ids = {o["id"] for o in list_available_outfits() if o.get("available")}
+                if cur_band == "sleep_time" and config.active_outfit == "default" and "pajama" in avail_ids:
+                    config.active_outfit = "pajama"
+                    config.save_persona_settings()
+                    await self.broadcast_appearance_state()
+                elif cur_band == "awake_time" and config.active_outfit == "pajama":
+                    config.active_outfit = "default"
+                    config.save_persona_settings()
+                    await self.broadcast_appearance_state()
+        elif oam == "daily":
+            today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+            if config.outfit_last_daily_date != today_str:
+                config.outfit_last_daily_date = today_str
+                await self.pick_random_outfit(exclude_current=True, reason="interval")
+        elif oam in ("interval", "random"):
+            interval_sec = max(60.0, float(int(config.outfit_interval_min or 60) * 60))
+            if (now - self.last_outfit_random_time) >= interval_sec:
+                await self.pick_random_outfit(exclude_current=True, reason="interval")
 
-            # 長期記憶の自動統合整理（Sleep Consolidation: 30分アイドル以上かつ12時間周期）
-            if (
-                config.memory_auto_consolidate
-                and not self.is_processing
-                and (now - self.last_interaction_time) >= 1800.0
-                and (now - self.last_memory_consolidate_time) >= 43200.0
-            ):
-                self.last_memory_consolidate_time = now
-                try:
-                    c_res = memory_manager.consolidate_memories()
-                    if c_res.get("merged_count", 0) > 0 or c_res.get("pruned_count", 0) > 0:
-                        await self.broadcast(
-                            {
-                                "type": "memories_updated",
-                                "memories": memory_manager.search_memories(limit=15),
-                                "consolidation_report": c_res,
-                            }
-                        )
-                except Exception as exc:
-                    print(f"[Memory] 自動整理エラー: {exc}")
+        # 天気連動背景演出の定期チェック（30分ごと）
+        if config.weather_bg_effect_enabled and (now - self.last_weather_bg_check) >= 1800.0:
+            self.last_weather_bg_check = now
+            try:
+                w_txt = await tool_get_weather("亀岡")
+                first_day = w_txt.splitlines()[1] if len(w_txt.splitlines()) > 1 else w_txt
+                new_kind = "rain" if ("雨" in first_day or "雪" in first_day) else ("cloudy" if "くもり" in first_day else "clear")
+                if new_kind != self.current_weather_kind:
+                    self.current_weather_kind = new_kind
+                    await self.broadcast_appearance_state()
+            except Exception:
+                pass
 
-            # 0. ポモドーロタイマー進行
-            if self.pomodoro["active"]:
-                elapsed = now - self.pomodoro["last_tick"]
-                self.pomodoro["last_tick"] = now
-                self.pomodoro["remaining_sec"] = max(0.0, self.pomodoro["remaining_sec"] - elapsed)
-                if self.pomodoro["remaining_sec"] <= 0:
-                    if self.pomodoro["phase"] == "work":
-                        self.pomodoro["phase"] = "break"
-                        self.pomodoro["remaining_sec"] = config.pomodoro_break_min * 60
-                        await self.enqueue_event(
-                            AgentEvent(
-                                source=EventSource.PROACTIVE,
-                                user="PomodoroTimer",
-                                content=f"ポモドーロの作業時間（{config.pomodoro_work_min}分）が完了しました！マスターを労い、今から{config.pomodoro_break_min}分間の休憩を取るよう声をかけてください。",
-                                priority=1,
-                                metadata={"discord_category": "alert"},
-                            )
-                        )
-                    else:
-                        self.pomodoro["phase"] = "work"
-                        self.pomodoro["remaining_sec"] = config.pomodoro_work_min * 60
-                        await self.enqueue_event(
-                            AgentEvent(
-                                source=EventSource.PROACTIVE,
-                                user="PomodoroTimer",
-                                content=f"休憩時間（{config.pomodoro_break_min}分）が終了しました！次の{config.pomodoro_work_min}分の集中作業サイクルを始めるようマスターに声をかけてください。",
-                                priority=1,
-                                metadata={"discord_category": "alert"},
-                            )
-                        )
-                await self.broadcast({"type": "pomodoro_tick", "pomodoro": self.pomodoro})
-
-            # 1. 定期的にシステムメトリクス＆アクティブウィンドウ監視
-            if now - self.last_system_check_time >= 4.0:
-                self.last_system_check_time = now
-                metrics = get_system_metrics()
-                await self.broadcast({"type": "system_metrics", "system_metrics": metrics})
-
-                is_dnd = config.dnd_fullscreen_mute and metrics.get("is_fullscreen", False)
-
-                # メモリ使用率逼迫警告
-                if (
-                    config.proactive_enabled
-                    and not is_dnd
-                    and config.mode == "agent"
-                    and metrics["memory_percent"] >= 92.0
-                    and not self.is_processing
-                    and (now - self.last_interaction_time) > 45.0
-                ):
-                    await self.enqueue_event(
-                        AgentEvent(
-                            source=EventSource.PROACTIVE,
-                            user="SystemWatch",
-                            content=f"PCのメモリ使用率が {metrics['memory_percent']}% に達しています。マスターにリソース逼迫を警告してください。",
-                            priority=2,
-                            metadata={"discord_category": "autonomous"},
-                        )
+        # 長期記憶の自動統合整理（Sleep Consolidation: 30分アイドル以上かつ12時間周期）
+        if (
+            config.memory_auto_consolidate
+            and not self.is_processing
+            and (now - self.last_interaction_time) >= 1800.0
+            and (now - self.last_memory_consolidate_time) >= 43200.0
+        ):
+            self.last_memory_consolidate_time = now
+            try:
+                c_res = memory_manager.consolidate_memories()
+                if c_res.get("merged_count", 0) > 0 or c_res.get("pruned_count", 0) > 0:
+                    await self.broadcast(
+                        {
+                            "type": "memories_updated",
+                            "memories": memory_manager.search_memories(limit=15),
+                            "consolidation_report": c_res,
+                        }
                     )
+            except Exception as exc:
+                print(f"[Memory] 自動整理エラー: {exc}")
 
-                # アクティブアプリ連動声かけ（スマートフック対応）
-                active_win = metrics.get("active_window", "")
-                if (
-                    config.proactive_enabled
-                    and config.window_watch_enabled
-                    and not is_dnd
-                    and config.mode == "agent"
-                    and not self.is_processing
-                    and self.queue.qsize() == 0
-                    and active_win
-                    and active_win not in ("Desktop", "Program Manager")
-                    and (now - self.last_window_watch_time) >= max(45, int(config.window_watch_interval_sec))
-                    and (now - self.last_interaction_time) >= max(45, int(config.window_watch_interval_sec))
-                ):
-                    self.last_window_watch_time = now
-                    self.last_active_window = active_win
-                    hint = ""
-                    if config.smart_hooks_enabled:
-                        aw_low = active_win.lower()
-                        if any(k in aw_low for k in ("visual studio", "code", "pycharm", "cursor", "terminal", "powershell")):
-                            hint = "（現在開発・プログラミング作業中です。進捗への気遣いや集中サポートを）"
-                        elif any(k in aw_low for k in ("youtube", "netflix", "twitch", "steam", "game")):
-                            hint = "（息抜き・エンタメ中です。無理のない範囲で軽くツッコミや休憩アドバイスを）"
+        # 0. ポモドーロタイマー進行
+        if self.pomodoro["active"]:
+            elapsed = now - self.pomodoro["last_tick"]
+            self.pomodoro["last_tick"] = now
+            self.pomodoro["remaining_sec"] = max(0.0, self.pomodoro["remaining_sec"] - elapsed)
+            if self.pomodoro["remaining_sec"] <= 0:
+                if self.pomodoro["phase"] == "work":
+                    self.pomodoro["phase"] = "break"
+                    self.pomodoro["remaining_sec"] = config.pomodoro_break_min * 60
                     await self.enqueue_event(
                         AgentEvent(
                             source=EventSource.PROACTIVE,
-                            user="WindowWatcher",
-                            content=f"マスターは現在「{active_win}」のウィンドウを開いて作業しています。{hint}作業内容に合わせた短い気遣いや相棒らしい声かけを1〜2文で行ってください。",
-                            priority=6,
-                            metadata={"discord_category": "autonomous"},
-                        )
-                    )
-
-                # 自動クリップボード監視（エラーログ・英文自動判定フック対応）
-                if config.clipboard_watch_enabled and not self.is_processing and config.mode == "agent":
-                    clip = get_clipboard_text()
-                    if clip and clip != self.last_clipboard_text and 12 <= len(clip) <= 1800:
-                        self.last_clipboard_text = clip
-                        await self.broadcast({"type": "clipboard_detected", "text_preview": clip[:120]})
-                        clip_prompt = f"マスターがクリップボードに以下のテキストをコピーしました。内容を簡潔に要約・解説するか、サポートが必要か声をかけてください:\n「{clip[:650]}」"
-                        if config.smart_hooks_enabled:
-                            if any(err in clip for err in ("Traceback (most recent call last)", "Error:", "Exception:", "SyntaxError", "TypeError", "HTTP 4", "HTTP 5")):
-                                clip_prompt = f"【スマートフック: エラーログ検知】マスターがエラー文をコピーしました。考えられる原因と修正手順を端的・辛口に助言してください:\n```\n{clip[:800]}\n```"
-                        await self.enqueue_event(
-                            AgentEvent(
-                                source=EventSource.PROACTIVE,
-                                user="ClipboardWatcher",
-                                content=clip_prompt,
-                                priority=3,
-                                metadata={"discord_category": "autonomous"},
-                            )
-                        )
-
-                # Windows トースト通知監視（ONかつAgentモード時）
-                if config.toast_watch_enabled and config.mode == "agent" and not self.is_processing:
-                    for note in windows_control_manager.poll_new_notifications():
-                        if "nia" in note["title"].lower() or "myagent" in note["app_id"].lower():
-                            continue
-                        await self.enqueue_event(
-                            AgentEvent(
-                                source=EventSource.PROACTIVE,
-                                user="WindowsToast",
-                                content=f"【Windows新規通知受信】アプリ: {note['app_id']} / 件名: {note['title']} / 内容: {note['body']}\nこの通知内容をマスターに短く伝えてください。",
-                                priority=3,
-                                metadata={"discord_category": "alert"},
-                            )
-                        )
-
-            # 2. 期限が到来したタスク・予定の能動アラート通知
-            due_tasks = memory_manager.pop_due_tasks()
-            for t in due_tasks:
-                await self.broadcast(
-                    {
-                        "type": "task_due_alert",
-                        "task": t,
-                        "tasks": memory_manager.get_tasks(status="pending"),
-                    }
-                )
-                if config.schedule_voice_notify:
-                    await self.enqueue_event(
-                        AgentEvent(
-                            source=EventSource.PROACTIVE,
-                            user="TaskScheduler",
-                            content=f"登録されていた予定・リマインダー「{t['title']}」の通知時刻になりました。マスターに音声で分かりやすく知らせてください。",
+                            user="PomodoroTimer",
+                            content=f"ポモドーロの作業時間（{config.pomodoro_work_min}分）が完了しました！マスターを労い、今から{config.pomodoro_break_min}分間の休憩を取るよう声をかけてください。",
                             priority=1,
                             metadata={"discord_category": "alert"},
                         )
                     )
+                else:
+                    self.pomodoro["phase"] = "work"
+                    self.pomodoro["remaining_sec"] = config.pomodoro_work_min * 60
+                    await self.enqueue_event(
+                        AgentEvent(
+                            source=EventSource.PROACTIVE,
+                            user="PomodoroTimer",
+                            content=f"休憩時間（{config.pomodoro_break_min}分）が終了しました！次の{config.pomodoro_work_min}分の集中作業サイクルを始めるようマスターに声をかけてください。",
+                            priority=1,
+                            metadata={"discord_category": "alert"},
+                        )
+                    )
+            await self.broadcast({"type": "pomodoro_tick", "pomodoro": self.pomodoro})
 
-            # 2.5 定時自律ワークフロー (Heartbeat / 朝ブリーフィング / Web更新監視)
-            if config.workflow_enabled and config.mode == "agent":
-                due_wfs = memory_manager.pop_due_workflows()
-                for wf in due_wfs:
-                    try:
-                        await self.execute_workflow_now(wf)
-                        await self.broadcast({"type": "workflows_updated", "workflows": memory_manager.list_workflows()})
-                    except Exception as exc:
-                        print(f"[Workflow] 実行エラー: {exc}")
+        # 1. 定期的にシステムメトリクス＆アクティブウィンドウ監視
+        if now - self.last_system_check_time >= 4.0:
+            self.last_system_check_time = now
+            metrics = get_system_metrics()
+            await self.broadcast({"type": "system_metrics", "system_metrics": metrics})
 
-            # 2.6 VTuber 参加型投票・ミニゲームの自動タイムアウト締切
-            if interactive_game.active and now >= interactive_game.ends_at:
-                finished = interactive_game.finish_game()
-                memory_manager.add_stream_highlight("poll", f"企画締切: {finished['state']['title']}")
-                await self.broadcast({"type": "poll_update", "poll": interactive_game.get_state()})
+            is_dnd = config.dnd_fullscreen_mute and metrics.get("is_fullscreen", False)
+
+            # メモリ使用率逼迫警告
+            if (
+                config.proactive_enabled
+                and not is_dnd
+                and config.mode == "agent"
+                and metrics["memory_percent"] >= 92.0
+                and not self.is_processing
+                and (now - self.last_interaction_time) > 45.0
+            ):
                 await self.enqueue_event(
                     AgentEvent(
-                        source=EventSource.SILENCE_BREAKER,
-                        user="InteractiveGame",
-                        content=finished["prompt"],
+                        source=EventSource.PROACTIVE,
+                        user="SystemWatch",
+                        content=f"PCのメモリ使用率が {metrics['memory_percent']}% に達しています。マスターにリソース逼迫を警告してください。",
                         priority=2,
                         metadata={"discord_category": "autonomous"},
                     )
                 )
 
-            # 2.7 VTuber ライブ画面変化検知実況ループ
-            if (
-                config.mode == "vtuber"
-                and config.vtuber_screen_commentary_enabled
-                and not self.is_processing
-                and self.queue.qsize() == 0
-                and (now - self.last_screen_commentary_time) >= max(8, int(config.vtuber_screen_watch_interval_sec))
-            ):
-                self.last_screen_commentary_time = now
-                win = get_active_window_info()
-                if not win.get("is_excluded") and screen_commentator.is_window_safe_for_stream(win.get("title", "")):
-                    cap = capture_screen_image(target_override=config.vision_target)
-                    if cap.get("ok") and cap.get("base64_jpeg"):
-                        diff_score = screen_commentator.evaluate_change(cap["base64_jpeg"])
-                        if diff_score >= 3.5:
-                            await self.enqueue_event(
-                                AgentEvent(
-                                    source=EventSource.PROACTIVE,
-                                    user="ScreenCommentator",
-                                    content=(
-                                        f"【配信画面リアルタイム実況 (ウィンドウ: {cap['window_title']})】"
-                                        "現在画面に変化がありました。映っているゲームや作業・映像の様子を見て、リスナーと一緒に楽しむ短い実況ツッコミを1〜2文で喋ってください。"
-                                    ),
-                                    priority=4,
-                                    metadata={
-                                        "image_base64": cap["base64_jpeg"],
-                                        "discord_category": "autonomous",
-                                    },
-                                )
-                            )
-
-            # 3. 模擬ライブコメントストリーム（ONになっている場合）
-            if (
-                self.demo_stream_active
-                and config.mode == "vtuber"
-                and self.queue.qsize() == 0
-                and not self.is_processing
-            ):
-                if (now - self.last_interaction_time) >= 12.0:
-                    user, text, src, meta = random.choice(DEMO_VIEWER_COMMENTS)
-                    await self.enqueue_event(
-                        AgentEvent(
-                            source=src,
-                            user=user,
-                            content=text,
-                            metadata=meta,
-                            priority=1 if src == EventSource.SUPERCHAT else 4,
-                        )
-                    )
-                    continue
-
-            # 4. VTuberモード時の Silence Breaker（話題デッキ自動進行）
+            # アクティブアプリ連動声かけ（スマートフック対応）
+            active_win = metrics.get("active_window", "")
             if (
                 config.proactive_enabled
-                and config.mode == "vtuber"
+                and config.window_watch_enabled
+                and not is_dnd
+                and config.mode == "agent"
                 and not self.is_processing
                 and self.queue.qsize() == 0
-                and len(self.active_connections) > 0
+                and active_win
+                and active_win not in ("Desktop", "Program Manager")
+                and (now - self.last_window_watch_time) >= max(45, int(config.window_watch_interval_sec))
+                and (now - self.last_interaction_time) >= max(45, int(config.window_watch_interval_sec))
             ):
-                idle_sec = now - self.last_interaction_time
-                rotate_min = int(getattr(config, "talk_topic_rotate_min", 120) or 0)
-                if rotate_min > 0 and (now - self.last_topic_rotate_time) >= float(rotate_min * 60):
-                    # 一定時間（例: 2時間）経過したら話題を丸ごと次へ自動切替
-                    await self.trigger_next_talk_deck(advance_theme=True)
-                elif idle_sec >= config.silence_timeout_sec:
-                    await self.trigger_next_talk_deck(advance_theme=config.talk_deck_auto_advance)
+                self.last_window_watch_time = now
+                self.last_active_window = active_win
+                hint = ""
+                if config.smart_hooks_enabled:
+                    aw_low = active_win.lower()
+                    if any(k in aw_low for k in ("visual studio", "code", "pycharm", "cursor", "terminal", "powershell")):
+                        hint = "（現在開発・プログラミング作業中です。進捗への気遣いや集中サポートを）"
+                    elif any(k in aw_low for k in ("youtube", "netflix", "twitch", "steam", "game")):
+                        hint = "（息抜き・エンタメ中です。無理のない範囲で軽くツッコミや休憩アドバイスを）"
+                await self.enqueue_event(
+                    AgentEvent(
+                        source=EventSource.PROACTIVE,
+                        user="WindowWatcher",
+                        content=f"マスターは現在「{active_win}」のウィンドウを開いて作業しています。{hint}作業内容に合わせた短い気遣いや相棒らしい声かけを1〜2文で行ってください。",
+                        priority=6,
+                        metadata={"discord_category": "autonomous"},
+                    )
+                )
+
+            # 自動クリップボード監視（エラーログ・英文自動判定フック対応）
+            if config.clipboard_watch_enabled and not self.is_processing and config.mode == "agent":
+                clip = get_clipboard_text()
+                if clip and clip != self.last_clipboard_text and 12 <= len(clip) <= 1800:
+                    self.last_clipboard_text = clip
+                    await self.broadcast({"type": "clipboard_detected", "text_preview": clip[:120]})
+                    clip_prompt = f"マスターがクリップボードに以下のテキストをコピーしました。内容を簡潔に要約・解説するか、サポートが必要か声をかけてください:\n「{clip[:650]}」"
+                    if config.smart_hooks_enabled:
+                        if any(err in clip for err in ("Traceback (most recent call last)", "Error:", "Exception:", "SyntaxError", "TypeError", "HTTP 4", "HTTP 5")):
+                            clip_prompt = f"【スマートフック: エラーログ検知】マスターがエラー文をコピーしました。考えられる原因と修正手順を端的・辛口に助言してください:\n```\n{clip[:800]}\n```"
+                    await self.enqueue_event(
+                        AgentEvent(
+                            source=EventSource.PROACTIVE,
+                            user="ClipboardWatcher",
+                            content=clip_prompt,
+                            priority=3,
+                            metadata={"discord_category": "autonomous"},
+                        )
+                    )
+
+            # Windows トースト通知監視（ONかつAgentモード時）
+            if config.toast_watch_enabled and config.mode == "agent" and not self.is_processing:
+                for note in windows_control_manager.poll_new_notifications():
+                    if "nia" in note["title"].lower() or "myagent" in note["app_id"].lower():
+                        continue
+                    await self.enqueue_event(
+                        AgentEvent(
+                            source=EventSource.PROACTIVE,
+                            user="WindowsToast",
+                            content=f"【Windows新規通知受信】アプリ: {note['app_id']} / 件名: {note['title']} / 内容: {note['body']}\nこの通知内容をマスターに短く伝えてください。",
+                            priority=3,
+                            metadata={"discord_category": "alert"},
+                        )
+                    )
+
+        # 2. 期限が到来したタスク・予定の能動アラート通知
+        due_tasks = memory_manager.pop_due_tasks()
+        for t in due_tasks:
+            await self.broadcast(
+                {
+                    "type": "task_due_alert",
+                    "task": t,
+                    "tasks": memory_manager.get_tasks(status="pending"),
+                }
+            )
+            if config.schedule_voice_notify:
+                await self.enqueue_event(
+                    AgentEvent(
+                        source=EventSource.PROACTIVE,
+                        user="TaskScheduler",
+                        content=f"登録されていた予定・リマインダー「{t['title']}」の通知時刻になりました。マスターに音声で分かりやすく知らせてください。",
+                        priority=1,
+                        metadata={"discord_category": "alert"},
+                    )
+                )
+
+        # 2.5 定時自律ワークフロー (Heartbeat / 朝ブリーフィング / Web更新監視)
+        if config.workflow_enabled and config.mode == "agent":
+            due_wfs = memory_manager.pop_due_workflows()
+            for wf in due_wfs:
+                try:
+                    await self.execute_workflow_now(wf)
+                    await self.broadcast({"type": "workflows_updated", "workflows": memory_manager.list_workflows()})
+                except Exception as exc:
+                    print(f"[Workflow] 実行エラー: {exc}")
+
+        # 2.6 VTuber 参加型投票・ミニゲームの自動タイムアウト締切
+        if interactive_game.active and now >= interactive_game.ends_at:
+            finished = interactive_game.finish_game()
+            memory_manager.add_stream_highlight("poll", f"企画締切: {finished['state']['title']}")
+            await self.broadcast({"type": "poll_update", "poll": interactive_game.get_state()})
+            await self.enqueue_event(
+                AgentEvent(
+                    source=EventSource.SILENCE_BREAKER,
+                    user="InteractiveGame",
+                    content=finished["prompt"],
+                    priority=2,
+                    metadata={"discord_category": "autonomous"},
+                )
+            )
+
+        # 2.7 VTuber ライブ画面変化検知実況ループ
+        if (
+            config.mode == "vtuber"
+            and config.vtuber_screen_commentary_enabled
+            and not self.is_processing
+            and self.queue.qsize() == 0
+            and (now - self.last_screen_commentary_time) >= max(8, int(config.vtuber_screen_watch_interval_sec))
+        ):
+            self.last_screen_commentary_time = now
+            win = get_active_window_info()
+            if not win.get("is_excluded") and screen_commentator.is_window_safe_for_stream(win.get("title", "")):
+                cap = capture_screen_image(target_override=config.vision_target)
+                if cap.get("ok") and cap.get("base64_jpeg"):
+                    diff_score = screen_commentator.evaluate_change(cap["base64_jpeg"])
+                    if diff_score >= 3.5:
+                        await self.enqueue_event(
+                            AgentEvent(
+                                source=EventSource.PROACTIVE,
+                                user="ScreenCommentator",
+                                content=(
+                                    f"【配信画面リアルタイム実況 (ウィンドウ: {cap['window_title']})】"
+                                    "現在画面に変化がありました。映っているゲームや作業・映像の様子を見て、リスナーと一緒に楽しむ短い実況ツッコミを1〜2文で喋ってください。"
+                                ),
+                                priority=4,
+                                metadata={
+                                    "image_base64": cap["base64_jpeg"],
+                                    "discord_category": "autonomous",
+                                },
+                            )
+                        )
+
+        # 3. 模擬ライブコメントストリーム（ONになっている場合）
+        if (
+            self.demo_stream_active
+            and config.mode == "vtuber"
+            and self.queue.qsize() == 0
+            and not self.is_processing
+        ):
+            if (now - self.last_interaction_time) >= 12.0:
+                user, text, src, meta = random.choice(DEMO_VIEWER_COMMENTS)
+                await self.enqueue_event(
+                    AgentEvent(
+                        source=src,
+                        user=user,
+                        content=text,
+                        metadata=meta,
+                        priority=1 if src == EventSource.SUPERCHAT else 4,
+                    )
+                )
+                return
+
+        # 4. VTuberモード時の Silence Breaker（話題デッキ自動進行）
+        if (
+            config.proactive_enabled
+            and config.mode == "vtuber"
+            and not self.is_processing
+            and self.queue.qsize() == 0
+            and len(self.active_connections) > 0
+        ):
+            idle_sec = now - self.last_interaction_time
+            rotate_min = int(getattr(config, "talk_topic_rotate_min", 120) or 0)
+            if rotate_min > 0 and (now - self.last_topic_rotate_time) >= float(rotate_min * 60):
+                # 一定時間（例: 2時間）経過したら話題を丸ごと次へ自動切替
+                await self.trigger_next_talk_deck(advance_theme=True)
+            elif idle_sec >= config.silence_timeout_sec:
+                await self.trigger_next_talk_deck(advance_theme=config.talk_deck_auto_advance)
 
 
 orchestrator = AgentOrchestrator()

@@ -102,6 +102,8 @@ async def post_chat(req: ChatRequest) -> dict[str, Any]:
 async def update_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """モード切替、ペルソナ設定、および全14機能の詳細設定をリアルタイム反映・永続化する。"""
     prev_mode = config.mode
+    prev_outfit_auto = config.outfit_auto_mode
+    prev_outfit_interval = config.outfit_interval_min
     if payload.get("api_key"):
         provider = payload.get("llm_provider") or config.llm_provider
         if provider == "gemini":
@@ -157,6 +159,14 @@ async def update_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     # AIエージェントモードへ戻った場合はVTuber模擬配信ストリームを自動停止する
     if config.mode != "vtuber":
         orchestrator.demo_stream_active = False
+
+    # 自動お着替えモードや間隔が変更された場合はタイマーをリセットしてログ出力
+    if config.outfit_auto_mode != prev_outfit_auto or config.outfit_interval_min != prev_outfit_interval:
+        orchestrator.last_outfit_random_time = time.time()
+        print(
+            f"[Outfit] 自動お着替え設定更新: mode={config.outfit_auto_mode}, "
+            f"interval={config.outfit_interval_min}分"
+        )
 
     # Discord Bot およびローカルマイク STT の稼働状態を設定値に同期する
     await orchestrator.discord_connector.sync_state()
@@ -544,6 +554,7 @@ async def update_appearance_api(payload: dict[str, Any] = Body(...)) -> dict[str
         oid = str(payload["outfit"]).strip().lower()
         if oid in avail_ids:
             config.active_outfit = oid
+            orchestrator.last_outfit_random_time = time.time()
     if "toggle_accessory" in payload and payload["toggle_accessory"]:
         acc = str(payload["toggle_accessory"]).strip().lower()
         if acc in ACCESSORY_CATALOG:
