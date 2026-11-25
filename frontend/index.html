@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NIA（ニア） // AIエージェント &amp; 自律型VTuber 統合管制システム</title>
-    <link rel="stylesheet" href="/css/style.css?v=31" />
+    <link rel="stylesheet" href="/css/style.css?v=32" />
 </head>
 <body class="mode-agent">
     <!-- トップヘッダーバー (OBSモード時は非表示) -->
@@ -669,8 +669,19 @@
                         <label class="checkbox-label"><input type="checkbox" id="cfg-talk-auto-advance" /> 無言防止のたびに毎回すぐ話題も切り替える（通常OFF推奨）</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-viewer-profile" checked /> 常連リスナー記憶（初見/常連・過去の会話特徴を自動記憶）</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-obs-topic-telop" checked /> OBS配信画面に「現在の配信テーマ」サブテロップを表示</label>
-                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-speech-log" checked /> OBS配信画面に「ニアの直近発話履歴ログ（直近4件）」を表示</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-obs-speech-log" /> OBS配信画面(?mode=obs)の左下に発話ログを重ねて表示（独立配置は <code>?mode=log</code> を推奨）</label>
                         <label class="checkbox-label"><input type="checkbox" id="cfg-obs-telop-pomo" checked /> OBSサブテロップにポモドーロ残り時間も表示する</label>
+                        <label class="checkbox-label"><input type="checkbox" id="cfg-twitch-chat-echo" /> 🟣 ニアの発言をTwitchチャットへ自動投稿（リスナーがチャット欄で発話履歴を追える）</label>
+                    </div>
+                    <div class="settings-grid-2">
+                        <label class="modal-field">
+                            <span>🤖 Twitch チャット投稿用アカウント名（配信アカウント本人またはBot名）</span>
+                            <input type="text" id="cfg-twitch-bot-user" placeholder="例: nia_ai_ch" />
+                        </label>
+                        <label class="modal-field">
+                            <span>🔑 Twitch OAuth トークン (<code>oauth:...</code> / secrets.json管理)</span>
+                            <input type="password" id="cfg-twitch-oauth-token" placeholder="設定済みなら空欄可（oauth:xxxx）" autocomplete="off" />
+                        </label>
                     </div>
                     <label class="modal-field">
                         <div class="inline-row" style="justify-content: space-between; align-items: center;">
@@ -1136,6 +1147,6 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=39"></script>
+    <script type="module" src="/js/app.js?v=40"></script>
 </body>
 </html>

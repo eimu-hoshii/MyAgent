@@ -22,9 +22,12 @@ class AgentController {
     constructor() {
         const params = new URLSearchParams(window.location.search);
         this.isObsMode = params.get("mode") === "obs";
+        this.isObsLogMode = params.get("mode") === "log";
         this.isMascotMode = params.get("mode") === "mascot";
         if (this.isObsMode) {
             document.body.classList.add("obs-mode");
+        } else if (this.isObsLogMode) {
+            document.body.classList.add("obs-log-mode");
         } else if (this.isMascotMode) {
             document.body.classList.add("mascot-mode");
         }
@@ -111,7 +114,7 @@ class AgentController {
      */
     _initAudioSyncChannel() {
         this.audioSyncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("nia_audio_sync") : null;
-        this.isMainConsole = !this.isObsMode && !this.isMascotMode;
+        this.isMainConsole = !this.isObsMode && !this.isMascotMode && !this.isObsLogMode;
 
         if (this.isMainConsole) {
             const updateOwnerHeartbeat = () => {
@@ -1583,6 +1586,15 @@ class AgentController {
         // タブ3: 配信・企画・NG検閲
         setVal("cfg-youtube-id", c.youtube_live_id || "");
         setVal("cfg-twitch-ch", c.twitch_channel || "");
+        setVal("cfg-twitch-bot-user", c.twitch_bot_username || "");
+        const twTokEl = document.getElementById("cfg-twitch-oauth-token");
+        if (twTokEl) {
+            twTokEl.value = "";
+            twTokEl.placeholder = c.has_twitch_oauth_token
+                ? "設定済み（変更時のみ新しい oauth:... を入力）"
+                : "未設定（例: oauth:xxxxxxxx）";
+        }
+        setCheck("cfg-twitch-chat-echo", !!c.twitch_chat_echo_enabled);
         setVal("cfg-live-ignored-users", Array.isArray(c.live_ignored_users) ? c.live_ignored_users.join(", ") : "");
         setCheck("cfg-live-ignore-cmds", c.live_ignore_bot_commands !== false);
         setVal("cfg-live-poll", c.live_poll_interval_sec ?? 6);
@@ -1591,7 +1603,7 @@ class AgentController {
         setVal("cfg-talk-rotate-min", c.talk_topic_rotate_min ?? 120);
         setCheck("cfg-talk-auto-news", c.talk_deck_auto_news ?? true);
         setCheck("cfg-talk-auto-advance", !!c.talk_deck_auto_advance);
-        setCheck("cfg-obs-speech-log", c.obs_speech_log_enabled !== false);
+        setCheck("cfg-obs-speech-log", !!c.obs_speech_log_enabled);
         setVal("cfg-talk-deck", (c.talk_deck_themes || []).join("\n"));
         setVal("cfg-ng-words", (c.ng_words || []).join(", "));
         setVal("cfg-ng-action", c.ng_action || "deflect");
@@ -1795,6 +1807,9 @@ class AgentController {
             clipboard_watch_enabled: chk("cfg-clipboard-watch"),
             youtube_live_id: val("cfg-youtube-id"),
             twitch_channel: val("cfg-twitch-ch"),
+            twitch_bot_username: val("cfg-twitch-bot-user"),
+            twitch_oauth_token: val("cfg-twitch-oauth-token"),
+            twitch_chat_echo_enabled: chk("cfg-twitch-chat-echo"),
             live_ignored_users: val("cfg-live-ignored-users"),
             live_ignore_bot_commands: chk("cfg-live-ignore-cmds"),
             live_poll_interval_sec: parseInt(val("cfg-live-poll"), 10) || 6,
@@ -4052,7 +4067,11 @@ class AgentController {
     _renderObsSpeechLogVisibility() {
         const box = document.getElementById("obs-speech-log");
         if (!box) return;
-        const enabled = this.isObsMode && this.currentConfig.obs_speech_log_enabled !== false;
+        if (this.isObsLogMode) {
+            box.classList.remove("hidden");
+            return;
+        }
+        const enabled = this.isObsMode && !!this.currentConfig.obs_speech_log_enabled;
         const list = document.getElementById("obs-speech-log-list");
         const hasItems = !!(list && list.children.length > 0);
         box.classList.toggle("hidden", !(enabled && hasItems));
@@ -4083,9 +4102,11 @@ class AgentController {
             item.appendChild(subSpan);
         }
         list.appendChild(item);
-        while (list.children.length > 4) {
+        const maxItems = this.isObsLogMode ? 12 : 4;
+        while (list.children.length > maxItems) {
             list.removeChild(list.firstChild);
         }
+        list.scrollTop = list.scrollHeight;
         this._renderObsSpeechLogVisibility();
     }
 

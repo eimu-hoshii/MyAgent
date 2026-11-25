@@ -2497,7 +2497,7 @@ body.mode-vtuber #btn-pointer-mode {
     display: none !important;
 }
 
-/* OBS専用：ニアの直近発話履歴ログ（通常コンソールでは非表示、?mode=obs のみ表示） */
+/* OBS専用：ニアの直近発話履歴ログ（通常コンソールでは非表示、?mode=log で独立全画面表示、?mode=obs でON時は左下コンパクト表示） */
 .obs-speech-log {
     display: none;
 }
@@ -2507,11 +2507,12 @@ body.obs-mode .obs-speech-log:not(.hidden) {
     flex-direction: column;
     gap: 5px;
     position: absolute;
-    left: 16px;
-    top: 72px;
-    width: min(390px, 38vw);
-    max-height: 360px;
-    padding: 9px 11px;
+    left: 12px;
+    bottom: 132px;
+    top: auto;
+    width: min(320px, 28vw);
+    max-height: 220px;
+    padding: 8px 10px;
     border-radius: 12px;
     background: rgba(10, 15, 30, 0.72);
     border: 1px solid rgba(56, 189, 248, 0.35);
@@ -2519,6 +2520,72 @@ body.obs-mode .obs-speech-log:not(.hidden) {
     backdrop-filter: blur(6px);
     z-index: 25;
     pointer-events: none;
+}
+
+/* OBS独立ログ専用ブラウザソース (?mode=log): アバター等を全て消し、透過背景で発話履歴のみ自由配置可能に */
+body.obs-log-mode {
+    background: transparent !important;
+    overflow: hidden;
+}
+
+body.obs-log-mode .obs-hide,
+body.obs-log-mode .top-bar,
+body.obs-log-mode .left-panel,
+body.obs-log-mode .right-panel,
+body.obs-log-mode #avatar-canvas,
+body.obs-log-mode #subtitle-box,
+body.obs-log-mode #obs-topic-widget,
+body.obs-log-mode #obs-news-card,
+body.obs-log-mode #obs-mailbag-card,
+body.obs-log-mode #obs-poll-widget,
+body.obs-log-mode .stage-top-bar,
+body.obs-log-mode .avatar-stage > *:not(#obs-speech-log) {
+    display: none !important;
+}
+
+body.obs-log-mode .main-grid,
+body.obs-log-mode .center-stage,
+body.obs-log-mode .avatar-stage {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    display: block !important;
+}
+
+body.obs-log-mode .obs-speech-log {
+    display: flex !important;
+    flex-direction: column;
+    gap: 6px;
+    position: fixed;
+    inset: 8px;
+    width: auto;
+    max-height: none;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(10, 15, 30, 0.78);
+    border: 1px solid rgba(56, 189, 248, 0.38);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    z-index: 30;
+}
+
+body.obs-log-mode .obs-speech-log-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+body.obs-log-mode .obs-speech-log-list::-webkit-scrollbar {
+    display: none;
+}
+
+body.obs-log-mode .obs-speech-log-item {
+    font-size: 0.92rem;
+    line-height: 1.45;
+    padding: 7px 10px;
 }
 
 .obs-speech-log-head {

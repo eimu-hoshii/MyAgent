@@ -32,6 +32,10 @@ class LiveStreamConnector:
         self._twitch_task: asyncio.Task[Any] | None = None
         self._batch_task: asyncio.Task[Any] | None = None
         self._current_twitch_ch: str = ""
+        self._twitch_writer: asyncio.StreamWriter | None = None
+        self._twitch_authed: bool = False
+        self._twitch_send_lock = asyncio.Lock()
+        self._last_twitch_send_at: float = 0.0
         self._comment_batch: list[dict[str, str]] = []
         self._batch_lock = asyncio.Lock()
         self._last_comment_added_at: float = 0.0
@@ -72,13 +76,17 @@ class LiveStreamConnector:
         if not clean_text:
             return
 
-        # 無視ユーザー / モデレーションBot（Nightbot, StreamElements等）のコメントを完全除外
+        # 無視ユーザー / モデレーションBot（Nightbot, StreamElements等）および自分自身の投稿アカウントを完全除外
         norm_user = (user_name or "").strip().lstrip("@").lower()
+        norm_user = re.sub(r"\s*\((?:twitch|yt|youtube)\)\s*$", "", norm_user).strip()
         ignored_set = {
             str(u).strip().lstrip("@").lower()
             for u in (config.live_ignored_users or [])
             if str(u).strip()
         }
+        bot_user = (config.twitch_bot_username or "").strip().lstrip("@").lower()
+        if bot_user:
+            ignored_set.add(bot_user)
         if norm_user and norm_user in ignored_set:
             return
 
@@ -343,25 +351,79 @@ class LiveStreamConnector:
                 }
         return None
 
+    async def send_twitch_chat(self, message: str, prefix: str = "") -> bool:
+        """認証済みTwitch IRC接続を用いて、ニアの発話内容をTwitchチャットへ直接投稿する。"""
+        writer = self._twitch_writer
+        ch = self._current_twitch_ch
+        if not writer or not self._twitch_authed or not ch:
+            return False
+        clean = re.sub(r"[\r\n]+", " ", (message or "")).strip()
+        if not clean:
+            return False
+        body = f"{prefix}{clean}".strip()
+        if len(body) > 440:
+            body = body[:437] + "..."
+
+        async with self._twitch_send_lock:
+            now = time.time()
+            wait_sec = 1.6 - (now - self._last_twitch_send_at)
+            if wait_sec > 0:
+                await asyncio.sleep(wait_sec)
+            try:
+                if self._twitch_writer is None or self._twitch_writer.is_closing():
+                    return False
+                self._twitch_writer.write(f"PRIVMSG #{ch} :{body}\r\n".encode("utf-8"))
+                await self._twitch_writer.drain()
+                self._last_twitch_send_at = time.time()
+                return True
+            except Exception as exc:
+                print(f"[TwitchIRC] チャット送信エラー: {exc}")
+                return False
+
     async def _twitch_loop(self) -> None:
-        """Twitch 匿名IRC (IRCv3タグ付き) を用いてチャット・Bits・Sub・Raid をリアルタイム受信する。"""
+        """Twitch IRCv3（匿名受信 / OAuth認証時はチャット送信にも対応）でリアルタイム接続する。"""
         while True:
             ch = config.twitch_channel.strip().lstrip("#").lower()
             if not ch:
+                self._current_twitch_ch = ""
+                self._twitch_writer = None
+                self._twitch_authed = False
                 await asyncio.sleep(4.0)
                 continue
 
+            bot_user = (config.twitch_bot_username or "").strip().lstrip("@").lower()
+            oauth_raw = (config.twitch_oauth_token or "").strip()
+            use_auth = bool(bot_user and oauth_raw)
+            conn_sig = (ch, bot_user if use_auth else "", oauth_raw if use_auth else "")
+
+            writer: asyncio.StreamWriter | None = None
             try:
                 reader, writer = await asyncio.open_connection("irc.chat.twitch.tv", 6667)
                 writer.write(b"CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
-                writer.write(b"PASS SCHMOOPIIE\r\n")
-                writer.write(b"NICK justinfan67420\r\n")
+                if use_auth:
+                    pass_val = oauth_raw if oauth_raw.startswith("oauth:") else f"oauth:{oauth_raw}"
+                    writer.write(f"PASS {pass_val}\r\n".encode("utf-8"))
+                    writer.write(f"NICK {bot_user}\r\n".encode("utf-8"))
+                else:
+                    writer.write(b"PASS SCHMOOPIIE\r\n")
+                    writer.write(b"NICK justinfan67420\r\n")
                 writer.write(f"JOIN #{ch}\r\n".encode("utf-8"))
                 await writer.drain()
                 self._current_twitch_ch = ch
+                self._twitch_writer = writer
+                self._twitch_authed = use_auth
 
-                while config.twitch_channel.strip().lstrip("#").lower() == ch:
-                    line_bytes = await asyncio.wait_for(reader.readline(), timeout=45.0)
+                while True:
+                    cur_ch = config.twitch_channel.strip().lstrip("#").lower()
+                    cur_bot = (config.twitch_bot_username or "").strip().lstrip("@").lower()
+                    cur_oauth = (config.twitch_oauth_token or "").strip()
+                    cur_auth = bool(cur_bot and cur_oauth)
+                    if (cur_ch, cur_bot if cur_auth else "", cur_oauth if cur_auth else "") != conn_sig:
+                        break
+                    try:
+                        line_bytes = await asyncio.wait_for(reader.readline(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        continue
                     if not line_bytes:
                         break
                     line = line_bytes.decode("utf-8", errors="ignore").strip()
@@ -379,6 +441,13 @@ class LiveStreamConnector:
                             is_special=is_sp,
                             special_amount=parsed.get("amount", ""),
                         )
-                writer.close()
             except Exception:
                 await asyncio.sleep(5.0)
+            finally:
+                self._twitch_writer = None
+                self._twitch_authed = False
+                if writer is not None:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass

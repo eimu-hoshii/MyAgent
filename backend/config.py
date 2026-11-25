@@ -424,7 +424,10 @@ class AgentConfig:
     talk_deck_auto_news: bool = True  # 無言時に自動で最新ニュースを検索して話題にするか
     talk_deck_auto_advance: bool = False  # 無言防止時に画面上の配信テーマ・話題デッキを自動で次へ切り替えるか
     talk_topic_rotate_min: int = 120  # 話題を丸ごと次へ自動切替する間隔（分: 0=手動のみ, 既定120分=2時間）
-    obs_speech_log_enabled: bool = True  # OBS透過画面にニアの発話履歴ログ（直近4件）を表示するか
+    obs_speech_log_enabled: bool = False  # OBS透過画面(?mode=obs)内に発話履歴ログを重ねて表示するか（独立表示は ?mode=log を使用）
+    twitch_chat_echo_enabled: bool = False  # VTuberモード時、ニアの発言をTwitchチャットへ自動投稿するか
+    twitch_bot_username: str = ""  # Twitchチャット投稿に使うアカウント名（配信アカウント本人またはBotアカウント）
+    twitch_oauth_token: str = os.environ.get("TWITCH_OAUTH_TOKEN", "")  # Twitch IRC OAuthトークン (oauth:...) ※secrets.json管理
     ng_words: list[str] = field(default_factory=lambda: list(DEFAULT_NG_WORDS))
     ng_action: str = "deflect"  # "ignore" (完全無視) | "deflect" (クールにあしらう)
     live_ignored_users: list[str] = field(
@@ -580,12 +583,14 @@ class AgentConfig:
         d.pop("github_token", None)
         d.pop("obs_ws_password", None)
         d.pop("vts_auth_token", None)
+        d.pop("twitch_oauth_token", None)
         d["has_gemini_key"] = bool(self.gemini_api_key)
         d["has_openai_key"] = bool(self.openai_api_key)
         d["has_discord_token"] = bool(self.discord_bot_token)
         d["has_github_token"] = bool(self.github_token)
         d["has_obs_password"] = bool(self.obs_ws_password)
         d["has_vts_token"] = bool(self.vts_auth_token)
+        d["has_twitch_oauth_token"] = bool(self.twitch_oauth_token)
         if extra:
             d.update(extra)
         return d
@@ -624,6 +629,7 @@ class AgentConfig:
             "wake_word",
             "youtube_live_id",
             "twitch_channel",
+            "twitch_bot_username",
             "ng_action",
             "stream_topic",
             "discord_notify_user_id",
@@ -713,6 +719,7 @@ class AgentConfig:
             "affection_enabled",
             "live_ignore_bot_commands",
             "obs_speech_log_enabled",
+            "twitch_chat_echo_enabled",
         ]
         for bf in bool_fields:
             if bf in data and data[bf] is not None:
@@ -848,7 +855,7 @@ class AgentConfig:
             with open(SECRETS_PATH, "r", encoding="utf-8") as f:
                 sec = json.load(f)
             if isinstance(sec, dict):
-                for key in ("discord_bot_token", "github_token", "obs_ws_password", "vts_auth_token"):
+                for key in ("discord_bot_token", "github_token", "obs_ws_password", "vts_auth_token", "twitch_oauth_token"):
                     if sec.get(key):
                         setattr(self, key, str(sec[key]).strip())
         except Exception as exc:
@@ -867,7 +874,7 @@ class AgentConfig:
                         sec = loaded
                 except Exception:
                     pass
-            for key in ("discord_bot_token", "github_token", "obs_ws_password", "vts_auth_token"):
+            for key in ("discord_bot_token", "github_token", "obs_ws_password", "vts_auth_token", "twitch_oauth_token"):
                 val = getattr(self, key, "")
                 if val:
                     sec[key] = val
@@ -902,6 +909,7 @@ class AgentConfig:
                 "has_github_token",
                 "has_obs_password",
                 "has_vts_token",
+                "has_twitch_oauth_token",
                 "preferred_ollama_models",
             ):
                 save_data.pop(meta_key, None)

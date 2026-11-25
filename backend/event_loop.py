@@ -903,6 +903,17 @@ class AgentOrchestrator:
                     }
                 )
 
+                # VTuberモード時：設定ONかつTwitch OAuth認証済みなら、ニアの発言をTwitchチャットへ自動投稿
+                if (
+                    config.mode == "vtuber"
+                    and config.twitch_chat_echo_enabled
+                    and result.speech
+                ):
+                    echo_text = result.speech.strip()
+                    if config.bilingual_enabled and result.speech_sub and len(echo_text) + len(result.speech_sub) < 420:
+                        echo_text = f"{echo_text} / {result.speech_sub.strip()}"
+                    asyncio.create_task(self.live_connector.send_twitch_chat(echo_text, prefix="🤖 "))
+
                 self.last_interaction_time = time.time()
                 self.is_processing = False
                 self.queue.task_done()

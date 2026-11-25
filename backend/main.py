@@ -131,6 +131,13 @@ async def update_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         config.obs_ws_password = str(payload["obs_ws_password"]).strip()
         secrets_dirty = True
 
+    if payload.get("clear_twitch_oauth_token"):
+        config.twitch_oauth_token = ""
+        secrets_dirty = True
+    elif payload.get("twitch_oauth_token") and str(payload["twitch_oauth_token"]).strip():
+        config.twitch_oauth_token = str(payload["twitch_oauth_token"]).strip()
+        secrets_dirty = True
+
     if secrets_dirty:
         config.save_secrets()
 
