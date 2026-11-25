@@ -9,6 +9,14 @@ import os
 import subprocess
 import sys
 import time
+
+# Windows(cp932)環境での絵文字ログ出力による UnicodeEncodeError 起動クラッシュを防止
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect

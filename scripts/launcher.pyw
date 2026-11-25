@@ -106,6 +106,9 @@ def start_backend_silent() -> int:
     """黒いcmd画面を出さずにFastAPIバックエンドサーバーを起動し、PIDを返す。"""
     os.makedirs(DATA_DIR, exist_ok=True)
     log_fp = open(LOG_FILE, "a", encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.Popen(
         [
             PYTHON_EXE,
@@ -118,6 +121,7 @@ def start_backend_silent() -> int:
             "8000",
         ],
         cwd=BASE_DIR,
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=log_fp,
         stderr=log_fp,

@@ -172,10 +172,14 @@ class AgentOrchestrator:
         config.active_outfit = chosen["id"]
         self.last_outfit_random_time = time.time()
         config.save_persona_settings()
-        print(
-            f"[Outfit] 着替え実行 ({reason}): {cur} -> {chosen['id']} ({chosen.get('name', chosen['id'])})"
-            + (f" / 次回: {config.outfit_interval_min}分後" if reason == "interval" else "")
-        )
+        try:
+            msg = (
+                f"[Outfit] 着替え実行 ({reason}): {cur} -> {chosen['id']} ({chosen.get('name', chosen['id'])})"
+                + (f" / 次回: {config.outfit_interval_min}分後" if reason == "interval" else "")
+            )
+            print(msg)
+        except Exception:
+            print(f"[Outfit] changed ({reason}): {cur} -> {chosen['id']}")
         state = await self.broadcast_appearance_state()
         await self.broadcast({"type": "config_updated", "config": self.get_public_config()})
         return {"ok": True, "chosen": chosen, **state}
